@@ -1,6 +1,6 @@
 function [mrec, mmin, output] = testcu(solvers, options)
 
-if (ischstr(solvers))  % In case solvers is indeed the name of a solver
+if (ischarstr(solvers))  % In case solvers is indeed the name of a solver
     solvers = {solvers};
 end
 solvers = lower(solvers);
@@ -96,7 +96,7 @@ assert(options.maxdim <= maxn);
 % Select the problems to test.
 if isfield(options, 'list')
     plist = options.list; % Use the list provided by the user, neglecting all other requirements
-    if (ischstr(plist))  % In case plist is indeed the name of a problem
+    if (ischarstr(plist))  % In case plist is indeed the name of a problem
         plist = {plist};
     end
 else
@@ -170,6 +170,7 @@ end
 if sequential
     for ip = minip : maxip
 
+        % Turn off unwanted warnings
         orig_warning_state = warnoff(solvers);
 
         pname = plist{ip};
@@ -231,11 +232,14 @@ if sequential
         system(['touch ', fullfile(prob_end_dir, pname)]);
         fprintf('\n%3d. \t%s ends at %s\n', ip, pname, char(datetime()));
 
-        warning(orig_warning_state); % Restore the behavior of displaying warnings
+        % Restore the behavior of displaying warnings
+        warning(orig_warning_state);
 
     end
 else
     parfor ip = minip : maxip
+
+        % Turn off unwanted warnings
         orig_warning_state = warnoff(solvers);
 
         pname = plist{ip};
@@ -297,7 +301,8 @@ else
         system(['touch ', fullfile(prob_end_dir, pname)]);
         fprintf('\n%3d. \t%s ends at %s\n', ip, pname, char(datetime()));
 
-        warning(orig_warning_state); % Restore the behavior of displaying warnings
+        % Restore the behavior of displaying warnings
+        warning(orig_warning_state);
 
     end
 end
@@ -395,7 +400,7 @@ function [fval_history, cv_history, output] = testsolv(solver, prob, options)
 
 prob.options = setsolvopt(solver, length(prob.x0), options); % Set the options for the solver
 
-if ischstr(solver) && ~strcmp(solver, 'fmincon') && ~strcmpi(solver, 'fminunc') && ~strcmpi(solver, 'fminsearch')
+if ischarstr(solver) && ~strcmp(solver, 'fmincon') && ~strcmpi(solver, 'fminunc') && ~strcmpi(solver, 'fminsearch')
     prob.options.classical = endsWith(solver, '_classical');
     if endsWith(solver, '_single')
         prob.options.precision = 'single';
@@ -779,9 +784,8 @@ else
     [cineq, ceq] = con(x);
 end
 options.ir = ir;
-afun = @(f) evalf(f, x, options);
-cineq = arrayfun(afun, cineq);
-ceq = arrayfun(afun, ceq);
+cineq = arrayfun(@(f) evalf(f, x, options), cineq);
+ceq = arrayfun(@(f) evalf(f, x, options), ceq);
 return
 
 

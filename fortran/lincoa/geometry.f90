@@ -8,7 +8,7 @@ module geometry_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Wednesday, May 10, 2023 PM08:35:18
+! Last Modified: Wednesday, July 19, 2023 PM04:07:52
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -115,7 +115,7 @@ weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**3  ! Powell's NEWUOA cod
 ! Other possible definitions of WEIGHT.
 ! !weight = distsq**2  ! Powell's code. WRONG.
 ! !weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**2.5  ! Worse than power 3
-! !weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**3.5  ! Worse than Powell 3
+! !weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**3.5  ! Worse than power 3
 ! !weight = (distsq / delta**2)**2   ! Works the same as DISTSQ**2 (as it should be).
 ! !weight = (distsq / delta**2)**3  ! Not bad
 ! !weight = max(1.0_RP, 10.0_RP * distsq / rho**2)**3
@@ -123,7 +123,7 @@ weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**3  ! Powell's NEWUOA cod
 ! !weight = max(1.0_RP, 10.0_RP * distsq / delta**2)**3
 ! !weight = max(1.0_RP, 1.0E2_RP * distsq / delta**2)**3
 !--------------------------------------------------------------------------------------------------!
-! N.B.: If DISTSQ is the square of distances to the updated XOPT, then it is wrong to set WEIGHT to
+! N.B.: If DISTSQ is the square of distances to the updated XOPT, then it is WRONG to set WEIGHT to
 ! DISTSQ**2 or any power of DISTSQ. Why?
 !
 ! Consider a scenario where XIMPROVED is TRUE and the new interpolation point XNEW is quite close to
@@ -131,8 +131,9 @@ weight = max(ONE, distsq / max(TENTH * delta, rho)**2)**3  ! Powell's NEWUOA cod
 ! value of KNEW is J; otherwise, the new interpolation problem will be close to degenerate and its
 ! KKT system will be close to singular due to the two close points in the updated interpolation set.
 !
-! What KNEW will be generated if KNEW = MAXLOC(DISTSQ**p * ABS(DEN))? Note the following.
-! 1. DISTSQ(J) = O(E**2) and DEN(K) = O(1);
+! What KNEW will be generated if KNEW = MAXLOC(DISTSQ**p * ABS(DEN))? If ||XNEW - XPT(:, J)|| = E,
+! we have the following.
+! 1. DISTSQ(J) = O(E**2) and DEN(J) = O(1);
 ! 2. for any K /= J, DIST(K) = O(1) and DEN(K) = O(E).
 ! Therefore, for any p > 1/2, KNEW /= J when E is small. As analyzed above, this is inappropriate.
 ! In addition, small values of p (e.g., p <= 1/2) always performs poorly for all Powell's methods
@@ -295,7 +296,7 @@ real(RP) :: denabs
 real(RP) :: distsq(size(xpt, 2))
 real(RP) :: glag(size(xpt, 1))
 real(RP) :: gstp(size(xpt, 1))
-real(RP) :: normg
+real(RP) :: gnorm
 real(RP) :: pglag(size(xpt, 1))
 real(RP) :: pgstp(size(xpt, 1))
 real(RP) :: pqlag(size(xpt, 2))
@@ -382,9 +383,9 @@ den = calden(kopt, bmat, s, xpt, zmat, idz)  ! Indeed, only DEN(KNEW) is needed.
 denabs = abs(den(knew))
 
 ! Replace S with a steepest ascent step from XOPT if the latter provides a larger value of DENABS.
-normg = norm(glag)
-if (normg > 0) then
-    gstp = (delbar / normg) * glag
+gnorm = norm(glag)
+if (gnorm > EPS .and. is_finite(gnorm)) then
+    gstp = (delbar / gnorm) * glag
     if (inprod(gstp, hess_mul(gstp, xpt, pqlag)) < 0) then  ! <GSTP, HESS_LAG*GSTP> is negative
         gstp = -gstp
     end if
@@ -411,12 +412,13 @@ feasible = (cstrv <= 0)
 ! QFAC(:, NACT+1:N), i.e., the orthogonal complement of the space spanned by the active gradients.
 ! In precise arithmetic, moving along PGSTP does not change the values of the active constraints.
 ! This projected gradient step is preferred and will override S if it renders a denominator not too
-! small and leads to good feasibility. **This strategy is critical for the performance of LINCOA.**
+! small and leads to good feasibility. *** This is critical for the performance of LINCOA. ***
+! In the following, NORMG > EPS prevents floating point exception, and it implies NACT < N.
 pglag = matprod(qfac(:, nact + 1:n), matprod(glag, qfac(:, nact + 1:n)))
 !!MATLAB: pglag = qfac(:, nact+1:n) * (glag' * qfac(:, nact+1:n))';
-normg = norm(pglag)
-if (nact > 0 .and. nact < n .and. normg > EPS) then  ! EPS prevents floating point exception.
-    pgstp = (delbar / normg) * pglag
+gnorm = norm(pglag)
+if (nact > 0 .and. gnorm > EPS .and. is_finite(gnorm)) then
+    pgstp = (delbar / gnorm) * pglag
     if (inprod(pgstp, hess_mul(pgstp, xpt, pqlag)) < 0) then  ! <PGSTP, HESS_LAG*PGSTP> is negative.
         pgstp = -pgstp
     end if

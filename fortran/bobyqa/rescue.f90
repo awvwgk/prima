@@ -18,7 +18,7 @@ module rescue_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Friday, May 12, 2023 PM06:47:46
+! Last Modified: Wednesday, June 21, 2023 PM08:32:09
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -140,6 +140,7 @@ character(len=*), parameter :: srname = 'RESCUE'
 integer(IK) :: ij(2, max(0, size(xpt, 2) - 2 * size(xpt, 1) - 1))
 integer(IK) :: ip
 integer(IK) :: iq
+integer(IK) :: iter
 integer(IK) :: k
 integer(IK) :: kbase
 integer(IK) :: korig
@@ -147,6 +148,7 @@ integer(IK) :: kprov
 integer(IK) :: kpt
 integer(IK) :: maxfhist
 integer(IK) :: maxhist
+integer(IK) :: maxiter
 integer(IK) :: maxxhist
 integer(IK) :: n
 integer(IK) :: nprov
@@ -302,19 +304,33 @@ ptsid(kopt) = ZERO
 ! BOBYQA paper). The latter seem to work better in a test on 20221125.
 !score = sum(xpt**2, dim=1)  ! Powell's BOBYQA code
 score = sqrt(sum(xpt**2, dim=1))  ! Powell's BOBYQA paper
-score(kopt) = ZERO  ! Set SCORE(KOPT) to 0 so that KOPT will be skipped when we choose KORIG below.
+! In theory, SCORE(KOPT) = 0. Make sure this so that KOPT will be skipped when we choose KORIG below.
+score(kopt) = ZERO
 scoreinc = maxval(score)
 
 ! NPROV is the number of provisional points that has not yet been replaced with original points.
 nprov = npt - 1_IK
 
-! The following loop runs for at most NPT^2 times: for each value of NPROV, we need at most NPT
-! loops to find an original point that can safely replace a provisional point; if such a pair of
-! origin and provisional points are found, then NPROV will de reduced by 1; otherwise, SCORE will
-! become all zero or negative, and the loop will exit.
-do while (any(score > 0) .and. nprov > 1)   ! Retain at least one provisional point.
-! !do while (any(score > 0) .and. nprov > 0)  ! Powell's code. It may not take any provisional point.
-! !do while (any(score > 0) .and. nprov > 2)  ! Retain at least two provisional points.
+! Even without an upper bound for the loop counter, the following loop runs for at most NPT^2 times:
+! for each value of NPROV, we need at most NPT loops to find an original point that can safely
+! replace a provisional point; if such a pair of origin and provisional points are found, then NPROV
+! will de reduced by 1; otherwise, SCORE will become all zero or negative, and the loop will exit.
+! Originally, it is a WHILE loop, but we change it to a DO loop to avoid infinite cycling.
+! N.B.: Overflow will occur in NPT^2 if NPT > 180 and IK = 16. The following is a workaround, which
+! is **not needed in Python/MATLAB/Julia/R. In MATLAB, we can just take maxiter = npt^2**.
+if (2.0 * log10(real(npt)) < range(maxiter)) then
+    maxiter = npt * npt
+else
+    maxiter = huge(maxiter) - 2_IK
+end if
+do iter = 1, maxiter
+    ! !DO WHILE (ANY(SCORE > 0) .AND. NPROV > 1)   ! WHILE version.
+    ! !IF (ALL(SCORE <= 0) .AND. NPROV <= 0) THEN ! Powell's code. May not take any provisional point.
+    ! !IF (ALL(SCORE <= 0) .AND. NPROV <= 2) THEN  ! Retain at least two provisional points.
+    if (all(score <= 0) .or. nprov <= 1) then   ! Retain at least one provisional point.
+        exit
+    end if
+
     ! Pick the index KORIG of an original point that has not yet replaced one of the provisional
     ! points, giving attention to the closeness to XOPT and to previous tries with KORIG.
     korig = int(minloc(score, mask=(score > 0), dim=1), kind(korig))
@@ -395,15 +411,14 @@ do while (any(score > 0) .and. nprov > 1)   ! Retain at least one provisional po
     ! point will be ranked lower if it fails to fulfill MAXVAL(DEN) > C*MAXVAL(VLAG(1:NPT)**2).
     ! Even if KORIG cannot satisfy this condition for now, it may validate the inequality in future
     ! attempts, as BMAT and ZMAT will be updated.
-    if (is_finite(sum(abs(vlag))) .and. any(den > 5.0E-2_RP * maxval(vlag(1:npt)**2))) then
+    if (.not. (is_finite(sum(abs(vlag))) .and. any(den > 5.0E-2_RP * maxval(vlag(1:npt)**2)))) then
         ! The above condition works a bit better than Powell's version below due to the factor 0.05.
-        ! !if (any(den > 1.0E-2_RP * maxval(vlag(1:npt)**2))) then  ! Powell' code
-        kprov = int(maxloc(den, mask=(.not. is_nan(den)), dim=1), kind(kprov))
-        !!MATLAB: [~, kprov] = max(den, [], 'omitnan');
-    else
+        ! !IF (.NOT. (ANY(DEN > 1.0E-2_RP * MAXVAL(VLAG(1:NPT)**2)))) THEN  ! Powell' code
         score(korig) = -score(korig) - scoreinc
         cycle
     end if
+    kprov = int(maxloc(den, mask=(.not. is_nan(den)), dim=1), kind(kprov))
+    !!MATLAB: [~, kprov] = max(den, [], 'omitnan');
 
     ! Update BMAT, ZMAT, VLAG, and PTSID to exchange the KPROV-th and KORIG-th provisional points.
     ! After the exchanging, the KORIG-th original point will replace the KORIG-th provisional point.
@@ -455,6 +470,8 @@ if (nprov > 0) then
 
         ! Update XPT(:, KPT) to the new point. It contains at most two nonzeros XP and XQ at the IP
         ! and IQ entries.
+        xp = ZERO
+        xq = ZERO
         xpt(:, kpt) = ZERO
         if (ip > 0 .and. iq > 0) then
             xp = ptsaux(1, ip)
@@ -544,7 +561,7 @@ if (kopt /= kbase) then
 end if
 
 !--------------------------------------------------------------------------------------------------!
-! Zaikun 20221123: What if we rebuild the model? It seems to worsen the performance of BOBYQA.
+! Zaikun 20221123: What if we rebuild the model? It seems to worsen the performance of BOBYQA. Why?
 ! !hq = ZERO
 ! !pq = omega_mul(1_IK, zmat, fval - fval(kopt))
 ! !gopt = matprod(bmat(:, 1:npt), fval - fval(kopt)) + hess_mul(xpt(:, kopt), xpt, pq)
@@ -553,11 +570,15 @@ end if
 !--------------------------------------------------------------------------------------------------!
 ! Zaikun 20221123: Shouldn't we correct the models using the new [BMAT, ZMAT]?!
 ! In this way, we do not even need the quadratic model received by RESCUE is an interpolant.
-!real(RP) :: qval(size(xpt, 2))
-!qval = [(quadinc(xpt(:, k) - xpt(:, kopt), xpt, gopt, pq, hq), k=1, npt)]
-!pq = pq + omega_mul(1_IK, zmat, fval - qval - fval(kopt))
-!gopt = gopt + matprod(bmat(:, 1:npt), fval - qval - fval(kopt)) + hess_mul(xpt(:, kopt), xpt, pq)
+! !real(RP) :: qval(size(xpt, 2))
+! !qval = [(quadinc(xpt(:, k) - xpt(:, kopt), xpt, gopt, pq, hq), k=1, npt)]
+! !pq = pq + omega_mul(1_IK, zmat, fval - qval - fval(kopt))
+! !gopt = gopt + matprod(bmat(:, 1:npt), fval - qval - fval(kopt)) + hess_mul(xpt(:, kopt), xpt, pq)
 !--------------------------------------------------------------------------------------------------!
+
+!====================!
+!  Calculation ends  !
+!====================!
 
 ! Postconditions
 if (DEBUGGING) then

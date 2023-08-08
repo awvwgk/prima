@@ -6,7 +6,7 @@ module test_solver_mod
 !
 ! Started: September 2021
 !
-! Last Modified: Sunday, May 21, 2023 AM01:55:48
+! Last Modified: Friday, August 04, 2023 AM01:20:06
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -17,7 +17,7 @@ public :: test_solver
 contains
 
 
-subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed)
+subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed, testdim)
 
 use, non_intrinsic :: cobyla_mod, only : cobyla
 use, non_intrinsic :: consts_mod, only : RP, IK, TWO, TEN, ZERO, REALMAX
@@ -33,21 +33,22 @@ use, non_intrinsic :: string_mod, only : strip, istr
 implicit none
 
 character(len=PNLEN), intent(in), optional :: probs(:)
-integer(IK), intent(in), optional :: dimstride
-integer(IK), intent(in), optional :: maxdim
 integer(IK), intent(in), optional :: mindim
+integer(IK), intent(in), optional :: maxdim
+integer(IK), intent(in), optional :: dimstride
 integer(IK), intent(in), optional :: nrand
 integer, intent(in), optional :: randseed
+character(len=*), intent(in), optional :: testdim
 
 character(len=*), parameter :: bigprob = 'bigprob'
 character(len=*), parameter :: solname = 'cobyla'
 character(len=*), parameter :: srname = 'TEST_COBYLA'
+character(len=:), allocatable :: testdim_loc
+character(len=PNLEN) :: fix_dim_probs(100)  ! Problems with fixed dimensions
 character(len=PNLEN) :: probname
 character(len=PNLEN) :: probs_loc(100)  ! Maximal number of problems to test: 100
-character(len=PNLEN) :: fix_dim_probs(size(probs_loc))  ! Problems with fixed dimensions
 integer :: randseed_loc
 integer :: rseed
-integer(IK), parameter :: bign = 120_IK
 integer(IK) :: dim_list(100)  ! Maximal number of dimensions to test: 100
 integer(IK) :: dimstride_loc
 integer(IK) :: idim
@@ -64,22 +65,29 @@ integer(IK) :: n
 integer(IK) :: ndim
 integer(IK) :: nprobs
 integer(IK) :: nrand_loc
-logical :: test_bigprob = .false.
+integer(IK), parameter :: bign = 80_IK
+integer(IK), parameter :: largen = 1000_IK
 real(RP) :: cstrv
 real(RP) :: ctol
 real(RP) :: f
-real(RP) :: f_unc
+real(RP) :: f_alt
 real(RP) :: ftarget
 real(RP) :: rhobeg
 real(RP) :: rhoend
+real(RP), allocatable :: Aineq(:, :)
+real(RP), allocatable :: bineq(:)
+real(RP), allocatable :: Aeq(:, :)
+real(RP), allocatable :: beq(:)
 real(RP), allocatable :: chist(:)
-real(RP), allocatable :: conhist(:, :)
-real(RP), allocatable :: constr(:)
+real(RP), allocatable :: nlchist(:, :)
+real(RP), allocatable :: nlconstr(:)
 real(RP), allocatable :: fhist(:)
 real(RP), allocatable :: x(:)
 real(RP), allocatable :: x0(:)
-real(RP), allocatable :: x_unc(:)
+real(RP), allocatable :: x_alt(:)
 real(RP), allocatable :: xhist(:, :)
+real(RP), allocatable :: xl(:)
+real(RP), allocatable :: xu(:)
 type(PROB_T) :: prob
 
 if (present(probs)) then
@@ -123,21 +131,28 @@ else
     randseed_loc = RANDSEED_DFT
 end if
 
+if (present(testdim)) then
+    testdim_loc = testdim
+else
+    testdim_loc = 'small'
+end if
+
 
 ! Test the big problem
-if (test_bigprob) then
+if (testdim_loc == 'big' .or. testdim_loc == 'large') then
     probname = bigprob
-    n = bign
+    n = merge(bign, largen, testdim_loc == 'big')
     do irand = 1, 1  ! The test is expensive
         rseed = int(sum(istr(solname)) + sum(istr(probname)) + n + irand + RP + randseed_loc)
         call setseed(rseed)
         m = int(min(int(10.0_RP * rand() * real(n, RP)), 10**min(range(0), range(0_IK))), IK)
+        m = min(m, floor(real(huge(m)) / 8.0, IK) - n - 2_IK)  ! Avoid integer overflow when calculating UNIT_MEMO in PREPROC/HISTORY
         call construct(prob, probname, n, m)
-        iprint = 3
-        if (int(n) + 500 > huge(0_IK)) then
+        iprint = 2_IK
+        if (int(n) + 2000 > huge(0_IK)) then
             maxfun = huge(0_IK)
         else
-            maxfun = n + int(500.0_RP * rand(), IK)
+            maxfun = n + int(2000.0_RP * rand(), IK)
         end if
         maxhist = maxfun
         maxfilt = int(TWO * rand() * real(maxfun, RP), kind(maxfilt))
@@ -148,15 +163,30 @@ if (test_bigprob) then
         end if
         ftarget = -REALMAX
         rhobeg = noisy(prob % Delta0)
-        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(4.0_RP * rand() - 3.5_RP))
+        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(6.0_RP * rand() - 6.0_RP))
         call safealloc(x, n) ! Not all compilers support automatic allocation yet, e.g., Absoft.
         x = noisy(prob % x0)
         orig_calcfc => prob % calcfc
+        call safealloc(xl, n)
+        xl = prob % xl
+        call safealloc(xu, n)
+        xu = prob % xu
+        call safealloc(Aineq, int(size(prob % Aineq, 1), IK), int(size(prob % Aineq, 2), IK))
+        Aineq = prob % Aineq
+        call safealloc(bineq, int(size(prob % bineq), IK))
+        bineq = prob % bineq
+        call safealloc(Aeq, int(size(prob % Aeq, 1), IK), int(size(prob % Aeq, 2), IK))
+        Aeq = prob % Aeq
+        call safealloc(beq, int(size(prob % beq), IK))
+        beq = prob % beq
 
-        print '(/A, I0, A, I0, A, I0, A, I0)', &
-            & strip(probname)//': N = ', n, ' M = ', m, ', MAXFUN = ', maxfun, ', Random test ', irand
-        call cobyla(noisy_calcfc, m, x, f, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxfilt=maxfilt,&
-            & maxhist=maxhist, fhist=fhist, xhist=xhist, chist=chist, conhist=conhist,&
+        print '(/A, I0, A, I0, A, I0, A, I0, A, I0, A, I0)', &
+           & strip(probname)//': N = ', n, ' M = ', m, ' Mineq = ', size(Aineq, 1), &
+           & ' Meq = ', size(Aeq, 1), ', MAXFUN = ', maxfun, ', Random test ', irand
+
+        call cobyla(noisy_calcfc, m, x, f, cstrv=cstrv, nlconstr=nlconstr, Aineq=Aineq, bineq=bineq, &
+            & Aeq=Aeq, beq=beq, xl=xl, xu=xu, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxfilt=maxfilt,&
+            & maxhist=maxhist, fhist=fhist, xhist=xhist, chist=chist, nlchist=nlchist,&
             & ftarget=ftarget, ctol=ctol, iprint=iprint)
 
         deallocate (x)
@@ -228,22 +258,55 @@ else
                 call safealloc(x0, n) ! Not all compilers support automatic allocation yet, e.g., Absoft.
                 x0 = noisy(prob % x0)
                 orig_calcfc => prob % calcfc
+                call safealloc(xl, n)
+                xl = prob % xl
+                call safealloc(xu, n)
+                xu = prob % xu
+                call safealloc(Aineq, int(size(prob % Aineq, 1), IK), int(size(prob % Aineq, 2), IK))
+                Aineq = prob % Aineq
+                call safealloc(bineq, int(size(prob % bineq), IK))
+                bineq = prob % bineq
+                call safealloc(Aeq, int(size(prob % Aeq, 1), IK), int(size(prob % Aeq, 2), IK))
+                Aeq = prob % Aeq
+                call safealloc(beq, int(size(prob % beq), IK))
+                beq = prob % beq
 
-                print '(/A, I0, A, I0, A, I0)', strip(probname)//': N = ', n, ' M = ', m, ', Random test ', irand
+                print '(/A, I0, A, I0, A, I0, A, I0, A, I0, A, I0)', strip(probname)//': N = ', n, ' M = ', m, &
+                    & ' Mineq = ', size(Aineq, 1), ' Meq = ', size(Aeq, 1), ', Random test ', irand
 
                 call safealloc(x, n)
                 x = x0
-                call cobyla(noisy_calcfc, m, x, f, cstrv=cstrv, constr=constr, rhobeg=rhobeg, rhoend=rhoend, &
-                    & maxfun=maxfun, maxhist=maxhist, fhist=fhist, xhist=xhist, conhist=conhist, chist=chist, &
+                call cobyla(noisy_calcfc, m, x, f, cstrv=cstrv, nlconstr=nlconstr, Aineq=Aineq, bineq=bineq, &
+                    & Aeq=Aeq, beq=beq, xl=xl, xu=xu, rhobeg=rhobeg, rhoend=rhoend, &
+                    & maxfun=maxfun, maxhist=maxhist, fhist=fhist, xhist=xhist, nlchist=nlchist, chist=chist, &
                     & ctol=ctol, ftarget=ftarget, maxfilt=maxfilt, iprint=iprint)
 
-                if (prob % probtype == 'u') then  ! Run the test without constraints
-                    call safealloc(x_unc, n)
-                    x_unc = x0
-                    call cobyla(noisy_calcfc, m, x_unc, f_unc, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxhist=maxhist, &
+                if (prob % probtype == 'l') then  ! Run the test without nonlinear constraints
+                    call safealloc(x_alt, n)
+                    x_alt = x0
+                    call cobyla(noisy_calcfc, m, x_alt, f_alt, Aineq=Aineq, bineq=bineq, Aeq=Aeq, beq=beq, &
+                        & xl=xl, xu=xu, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxhist=maxhist, &
                         & fhist=fhist, xhist=xhist, ftarget=ftarget, maxfilt=maxfilt, iprint=iprint)
-                    call validate(all(abs(x - x_unc) <= 0), 'X == X_UNC', srname)
-                    call validate(abs(f - f_unc) <= 0 .or. (is_neginf(f) .and. is_neginf(f_unc)), 'F == F_UNC', srname)
+                    call validate(all(abs(x - x_alt) <= 0), 'X == X_ALT', srname)
+                    call validate(abs(f - f_alt) <= 0 .or. (is_neginf(f) .and. is_neginf(f_alt)), 'F == F_ALT', srname)
+                end if
+
+                if (prob % probtype == 'b') then  ! Run the test without linear/nonlinear constraints
+                    call safealloc(x_alt, n)
+                    x_alt = x0
+                    call cobyla(noisy_calcfc, m, x_alt, f_alt, xl=xl, xu=xu, rhobeg=rhobeg, rhoend=rhoend, &
+                        & maxfun=maxfun, maxhist=maxhist, fhist=fhist, xhist=xhist, ftarget=ftarget, maxfilt=maxfilt, iprint=iprint)
+                    call validate(all(abs(x - x_alt) <= 0), 'X == X_ALT', srname)
+                    call validate(abs(f - f_alt) <= 0 .or. (is_neginf(f) .and. is_neginf(f_alt)), 'F == F_ALT', srname)
+                end if
+
+                if (prob % probtype == 'u') then  ! Run the test without constraints
+                    call safealloc(x_alt, n)
+                    x_alt = x0
+                    call cobyla(noisy_calcfc, m, x_alt, f_alt, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, &
+                        &maxhist=maxhist, fhist=fhist, xhist=xhist, ftarget=ftarget, maxfilt=maxfilt, iprint=iprint)
+                    call validate(all(abs(x - x_alt) <= 0), 'X == X_ALT', srname)
+                    call validate(abs(f - f_alt) <= 0 .or. (is_neginf(f) .and. is_neginf(f_alt)), 'F == F_ALT', srname)
                 end if
 
                 deallocate (x)

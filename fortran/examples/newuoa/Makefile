@@ -23,7 +23,7 @@ SOLVER := $(shell basename $(CURDIR))
 FS ?= 18  # Set FS if it does not have a value.
 FSTD := 20$(FS)
 # Default options for all the compilers.
-FFLAGS := -O3
+FFLAGS := -O3 -g
 # Common directories.
 COMMON := ../../common
 # Headers.
@@ -77,9 +77,8 @@ xtest: FC := ifx -warn all -stand f$(FS)
 ####################################################################################################
 # Compile the binary needed for a compiler-specific test
 %test: $(SOLVER)_example.f90 \
-	consts.o infos.o debug.o inf.o infnan.o memory.o string.o linalg.o powalg.o \
-	univar.o ratio.o redrho.o history.o checkexit.o fprint.o message.o preproc.o pintrf.o evaluate.o \
-	shiftbase.o \
+	consts.o infos.o debug.o inf.o infnan.o memory.o string.o linalg.o powalg.o univar.o ratio.o \
+	redrho.o history.o checkexit.o fprint.o message.o preproc.o pintrf.o evaluate.o shiftbase.o \
 	initialize.o trustregion.o geometry.o update.o newuob.o newuoa.o
 	$(FC) $(FFLAGS) -o $@ $(SOLVER)_example.f90 *.o
 	./$@

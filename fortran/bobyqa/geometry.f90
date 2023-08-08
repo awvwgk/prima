@@ -8,7 +8,7 @@ module geometry_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Wednesday, May 10, 2023 PM08:38:42
+! Last Modified: Monday, August 07, 2023 AM03:57:28
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -35,10 +35,6 @@ function setdrop_tr(kopt, ximproved, bmat, d, delta, rho, xpt, zmat) result(knew
 ! necessarily a good interpolation set. In contrast, a good interpolation set needs to include
 ! points with relatively high function values; otherwise, the interpolant will unlikely reflect the
 ! landscape of the function sufficiently.
-!--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: HDIAG(NPT), DENABS(NPT), SCORE(NPT) VLAG(N+NPT), XDIST(NPT)
-! Size of local arrays: REAL(RP)*(4*NPT+N)
 !--------------------------------------------------------------------------------------------------!
 
 ! Common modules
@@ -277,8 +273,7 @@ npt = int(size(xpt, 2), kind(npt))
 
 ! Preconditions
 if (DEBUGGING) then
-    call assert(n >= 1, 'N >= 1', srname)
-    call assert(npt >= n + 2, 'NPT >= N+2', srname)
+    call assert(n >= 1 .and. npt >= n + 2, 'N >= 1, NPT >= N + 2', srname)
     call assert(knew >= 1 .and. knew <= npt, '1 <= KNEW <= NPT', srname)
     call assert(kopt >= 1 .and. kopt <= npt, '1 <= KOPT <= NPT', srname)
     call assert(knew /= kopt, 'KNEW /= KOPT', srname)

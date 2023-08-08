@@ -5,7 +5,7 @@
 !
 ! Started: July 2020
 !
-! Last Modified: Wednesday, May 03, 2023 PM01:58:51
+! Last Modified: Friday, August 04, 2023 PM06:01:56
 !--------------------------------------------------------------------------------------------------!
 
 
@@ -62,20 +62,20 @@ real(kind(1.0_RP)), intent(out) :: f
 call assert(size(x) == 9 .and. size(constr) == 14, 'SIZE(X) == 9, SIZE(CONSTR) == 14', srname)
 
 f = -0.5_RP * (x(1) * x(4) - x(2) * x(3) + x(3) * x(9) - x(5) * x(9) + x(5) * x(8) - x(6) * x(7))
-constr(1) = 1.0_RP - x(3)**2 - x(4)**2
-constr(2) = 1.0_RP - x(9)**2
-constr(3) = 1.0_RP - x(5)**2 - x(6)**2
-constr(4) = 1.0_RP - x(1)**2 - (x(2) - x(9))**2
-constr(5) = 1.0_RP - (x(1) - x(5))**2 - (x(2) - x(6))**2
-constr(6) = 1.0_RP - (x(1) - x(7))**2 - (x(2) - x(8))**2
-constr(7) = 1.0_RP - (x(3) - x(5))**2 - (x(4) - x(6))**2
-constr(8) = 1.0_RP - (x(3) - x(7))**2 - (x(4) - x(8))**2
-constr(9) = 1.0_RP - x(7)**2 - (x(8) - x(9))**2
-constr(10) = x(1) * x(4) - x(2) * x(3)
-constr(11) = x(3) * x(9)
+constr(1) = -1.0_RP + x(3)**2 + x(4)**2
+constr(2) = -1.0_RP + x(9)**2
+constr(3) = -1.0_RP + x(5)**2 + x(6)**2
+constr(4) = -1.0_RP + x(1)**2 + (x(2) + x(9))**2
+constr(5) = -1.0_RP + (x(1) + x(5))**2 + (x(2) + x(6))**2
+constr(6) = -1.0_RP + (x(1) + x(7))**2 + (x(2) + x(8))**2
+constr(7) = -1.0_RP + (x(3) + x(5))**2 + (x(4) + x(6))**2
+constr(8) = -1.0_RP + (x(3) + x(7))**2 + (x(4) + x(8))**2
+constr(9) = -1.0_RP + x(7)**2 + (x(8) + x(9))**2
+constr(10) = -x(1) * x(4) + x(2) * x(3)
+constr(11) = -x(3) * x(9)
 constr(12) = -x(5) * x(9)
-constr(13) = x(5) * x(8) - x(6) * x(7)
-constr(14) = x(9)
+constr(13) = -x(5) * x(8) + x(6) * x(7)
+constr(14) = -x(9)
 end subroutine calcfc_hexagon
 
 end module calcfc_mod
@@ -92,35 +92,37 @@ use calcfc_mod, only : RP, calcfc_chebyquad, calcfc_hexagon
 
 implicit none
 
-real(RP) :: f
 integer, parameter :: n_chebyquad = 6
 real(RP) :: x_chebyquad(n_chebyquad)
 integer, parameter :: n_hexagon = 9
 real(RP) :: x_hexagon(n_hexagon)
+real(RP) :: f, cstrv
 real(RP), allocatable :: constr(:)
-integer :: m, i
+integer :: m, i, nf, info
 
 ! The following lines illustrates how to call the solver to solve the Chebyquad problem.
 x_chebyquad = [(real(i, RP) / real(n_chebyquad + 1, RP), i=1, n_chebyquad)] ! Starting point
 m = 0  ! Dimension of constraints. M must the specified correctly, or the program will crash!
-call cobyla(calcfc_chebyquad, m, x_chebyquad, f)  ! This call will not print anything.
+call cobyla(calcfc_chebyquad, m, x_chebyquad, f, cstrv)  ! This call will not print anything.
 
 ! In addition to the compulsory arguments, the following illustration specifies also CONSTR, RHOBEG,
 ! and IPRINT, which are optional. All the unspecified optional arguments (RHOEND, MAXFUN, etc.) will
 ! take their default values coded in the solver.
 x_chebyquad = [(real(i, RP) / real(n_chebyquad + 1, RP), i=1, n_chebyquad)] ! Starting point
-call cobyla(calcfc_chebyquad, m, x_chebyquad, f, rhobeg=0.2_RP * x_chebyquad(1), iprint=1)
+call cobyla(calcfc_chebyquad, m, x_chebyquad, f, cstrv, rhobeg=0.2_RP * x_chebyquad(1), iprint=1, nf=nf, info=info)
 
 ! The following lines illustrates how to call the solver to solve the Hexagon problem.
 x_hexagon = 2.0_RP  ! Starting point.
 m = 14  ! Dimension of constraints. M must the specified correctly, or the program will crash!
-call cobyla(calcfc_hexagon, m, x_hexagon, f)  ! This call will not print anything.
+call cobyla(calcfc_hexagon, m, x_hexagon, f, cstrv)  ! This call will not print anything.
 
 ! In addition to the compulsory arguments, the following illustration specifies also CONSTR, RHOBEG,
 ! and IPRINT, which are optional. All the unspecified optional arguments (RHOEND, MAXFUN, etc.) will
 ! take their default values coded in the solver. Note that CONSTR is an output, which will be set to
 ! the value of CONSTR(X_HEXAGON) when the solver returns.
 x_hexagon = 2.0_RP  ! Starting point.
-call cobyla(calcfc_hexagon, m, x_hexagon, f, constr=constr, rhobeg=1.0_RP, rhoend=1.0D-3, iprint=1)
+call cobyla(calcfc_hexagon, m, x_hexagon, f, cstrv, nlconstr=constr, rhobeg=1.0_RP, rhoend=1.0D-3, iprint=1, nf=nf, info=info)
+
+deallocate (constr) ! Deallocate the array CONSTR, which is allocated by the solver. Otherwise, memory leaks.
 
 end program cobyla_exmp

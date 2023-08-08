@@ -8,7 +8,7 @@ module uobyqb_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Friday, May 12, 2023 PM06:44:37
+! Last Modified: Friday, August 04, 2023 PM09:54:51
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -45,7 +45,7 @@ subroutine uobyqb(calfun, iprint, maxfun, eta1, eta2, ftarget, gamma1, gamma2, r
 
 ! Common modules
 use, non_intrinsic :: checkexit_mod, only : checkexit
-use, non_intrinsic :: consts_mod, only : RP, IK, ZERO, ONE, HALF, TENTH, REALMAX, DEBUGGING
+use, non_intrinsic :: consts_mod, only : RP, IK, ZERO, ONE, HALF, TENTH, EPS, REALMAX, DEBUGGING
 use, non_intrinsic :: debug_mod, only : assert
 use, non_intrinsic :: evaluate_mod, only : evaluate
 use, non_intrinsic :: history_mod, only : savehist, rangehist
@@ -111,6 +111,7 @@ logical :: improve_geo
 logical :: reduce_rho
 logical :: shortd
 logical :: small_trrad
+logical :: trfail
 logical :: ximproved
 real(RP) :: crvmin
 real(RP) :: d(size(x))
@@ -119,13 +120,13 @@ real(RP) :: delbar
 real(RP) :: delta
 real(RP) :: distsq((size(x) + 1) * (size(x) + 2) / 2)
 real(RP) :: dnorm
-real(RP) :: dnormsav(2)  ! Powell's implementation: DNORMSAV(3)
+real(RP) :: dnorm_rec(2)  ! Powell's implementation: DNORM_REC(3)
 real(RP) :: fval(size(distsq))
 real(RP) :: g(size(x))
 real(RP) :: gamma3
 real(RP) :: h(size(x), size(x))
 real(RP) :: moderr
-real(RP) :: moderrsav(size(dnormsav))
+real(RP) :: moderr_rec(size(dnorm_rec))
 real(RP) :: pl(size(distsq) - 1, size(distsq))
 real(RP) :: pq(size(distsq) - 1)
 real(RP) :: qred
@@ -160,10 +161,14 @@ end if
 ! Calculation starts !
 !====================!
 
+! Initialize XBASE, XPT, FVAL, and KOPT, together with the history and NF.
 call initxf(calfun, iprint, maxfun, ftarget, rhobeg, x, kopt, nf, fhist, fval, xbase, xhist, xpt, subinfo)
+
+! Initialize X and F according to KOPT.
 x = xbase + xpt(:, kopt)
 f = fval(kopt)
 
+! Check whether to return due to abnormal cases that may occur during the initialization.
 if (subinfo /= INFO_DFT) then
     info = subinfo
     ! Arrange FHIST and XHIST so that they are in the chronological order.
@@ -173,22 +178,26 @@ if (subinfo /= INFO_DFT) then
     return
 end if
 
-call initq(fval, xpt, pq)
+! Initialize the Lagrange polynomials represented by PL.
 call initl(xpt, pl)
+
+! Initialize the quadratic model represented by PQ.
+call initq(fval, xpt, pq)
 
 ! Set some more initial values.
 ! We must initialize RATIO. Otherwise, when SHORTD = TRUE, compilers may raise a run-time error that
-! RATIO is undefined. The value will not be used: when SHORTD = FALSE, its value will be overwritten;
-! when SHORTD = TRUE, its value is used only in BAD_TRSTEP, which is TRUE regardless of RATIO.
-! Similar for KNEW_TR.
+! RATIO is undefined. But its value will not be used: when SHORTD = FALSE, its value will be
+! overwritten; when SHORTD = TRUE, its value is used only in BAD_TRSTEP, which is TRUE regardless of
+! RATIO. Similar for KNEW_TR.
 ! No need to initialize SHORTD unless MAXTR < 1, but some compilers may complain if we do not do it.
 rho = rhobeg
 delta = rho
 shortd = .false.
+trfail = .false.
 ratio = -ONE
 ddmove = -ONE
-dnormsav = REALMAX
-moderrsav = REALMAX
+dnorm_rec = REALMAX
+moderr_rec = REALMAX
 knew_tr = 0
 knew_geo = 0
 
@@ -197,6 +206,8 @@ knew_geo = 0
 ! Then TRRAD will update DELTA to GAMMA2*RHO. If GAMMA3 >= GAMMA2, then DELTA will be reset to RHO,
 ! which is not reasonable as D is very successful. See paragraph two of Sec. 5.2.5 in
 ! T. M. Ragonneau's thesis: "Model-Based Derivative-Free Optimization Methods and Software".
+! According to test on 20230613, for UOBYQA, this Powellful updating scheme of DELTA works better
+! than setting directly DELTA = MAX(NEW_DELTA, RHO).
 gamma3 = max(ONE, min(0.75_RP * gamma2, 1.5_RP))
 
 ! MAXTR is the maximal number of trust-region iterations. Each trust-region iteration takes 1 or 2
@@ -222,10 +233,11 @@ do tr = 1, maxtr
     shortd = (dnorm < HALF * rho)
 
     ! Set QRED to the reduction of the quadratic model when the move D is made from XOPT. QRED
-    ! should be positive If it is nonpositive due to rounding errors, we will not take this step.
+    ! should be positive. If it is nonpositive due to rounding errors, we will not take this step.
     qred = -quadinc(pq, d, xpt(:, kopt))  ! QRED = Q(XOPT) - Q(XOPT + D)
+    trfail = (.not. qred > EPS * rho**2)  ! QRED is tiny/negative or NaN.
 
-    if (shortd .or. .not. qred > 0) then
+    if (shortd .or. trfail) then
         ! Powell's code does not reduce DELTA as follows. This comes from NEWUOA and works well.
         delta = TENTH * delta
         if (delta <= gamma3 * rho) then
@@ -249,13 +261,13 @@ do tr = 1, maxtr
             exit
         end if
 
-        ! Update DNORMSAV and MODERRSAV.
-        ! DNORMSAV contains the DNORM of the latest 3 function evaluations with the current RHO.
-        dnormsav = [dnormsav(2:size(dnormsav)), dnorm]
+        ! Update DNORM_REC and MODERR_REC.
+        ! DNORM_REC records the DNORM of the latest 3 function evaluations with the current RHO.
+        dnorm_rec = [dnorm_rec(2:size(dnorm_rec)), dnorm]
         ! MODERR is the error of the current model in predicting the change in F due to D.
-        ! MODERRSAV is the prediction errors of the latest 3 models with the current RHO.
+        ! MODERR_REC records the prediction errors of the latest 3 models with the current RHO.
         moderr = f - fval(kopt) + qred
-        moderrsav = [moderrsav(2:size(moderrsav)), moderr]
+        moderr_rec = [moderr_rec(2:size(moderr_rec)), moderr]
 
         ! Calculate the reduction ratio by REDRAT, which handles Inf/NaN carefully.
         ratio = redrat(fval(kopt) - f, qred, eta1)
@@ -279,7 +291,7 @@ do tr = 1, maxtr
             ! Update PL, PQ, XPT, FVAL, and KOPT so that XPT(:, KNEW_TR) becomes XOPT + D.
             call update(knew_tr, d, f, moderr, kopt, fval, pl, pq, xpt)
         end if
-    end if
+    end if  ! End of IF (SHORTD .OR. TRFAIL). The normal trust-region calculation ends.
 
 
     !----------------------------------------------------------------------------------------------!
@@ -293,14 +305,16 @@ do tr = 1, maxtr
     ! 2. If an iteration sets IMPROVE_GEO = TRUE, it must also reduce DELTA or set DELTA to RHO.
 
     ! ACCURATE_MOD: Are the recent models sufficiently accurate? Used only if SHORTD is TRUE.
-    accurate_mod = all(abs(moderrsav) <= 0.125_RP * crvmin * rho**2) .and. all(dnormsav <= rho)
+    accurate_mod = all(abs(moderr_rec) <= 0.125_RP * crvmin * rho**2) .and. all(dnorm_rec <= rho)
     ! CLOSE_ITPSET: Are the interpolation points close to XOPT?
     distsq = sum((xpt - spread(xpt(:, kopt), dim=2, ncopies=npt))**2, dim=1)
     !!MATLAB: distsq = sum((xpt - xpt(:, kopt)).^2)  % Implicit expansion
-    close_itpset = all(distsq <= 4.0_RP * delta**2)  ! Behaves the same as Powell's version.
+    close_itpset = all(distsq <= 4.0_RP * delta**2)  ! Powell's NEWUOA code.
     ! Below are some alternative definitions of CLOSE_ITPSET.
+    ! N.B.: The threshold for CLOSE_ITPSET is at least DELBAR, the trust region radius for GEOSTEP.
     ! !close_itpset = all(distsq <= 4.0_RP * rho**2)  ! Powell's code.
-    ! !close_itpset = all(distsq <= max((2.0_RP * delta)**2, (10.0_RP * rho)**2))  ! Powell's BOBYQA.
+    ! !close_itpset = all(distsq <= max((TWO * delta)**2, (TEN * rho)**2))  ! Powell's BOBYQA code.
+    ! !close_itpset = all(distsq <= max(delta**2, 4.0_RP * rho**2))  ! Powell's LINCOA code.
     ! ADEQUATE_GEO: Is the geometry of the interpolation set "adequate"?
     adequate_geo = (shortd .and. accurate_mod) .or. close_itpset
     ! SMALL_TRRAD: Is the trust-region radius small? This indicator seems not impactive in practice.
@@ -333,37 +347,37 @@ do tr = 1, maxtr
 
     ! IMPROVE_GEO and REDUCE_RHO are defined as follows.
     ! N.B.: If SHORTD is TRUE at the very first iteration, then REDUCE_RHO will be set to TRUE.
-    ! Powell's code does not have (.NOT. QRED>0) in BAD_TRSTEP; it terminates if QRED > 0 fails.
+    ! Powell's code does not have TRFAIL in BAD_TRSTEP; it terminates if TRFAIL is TRUE.
 
     ! BAD_TRSTEP (for IMPROVE_GEO): Is the last trust-region step bad? For UOBYQA, it is CRITICAL to
     ! include DMOVE <= 4.0_RP*RHO**2 in the definition of BAD_TRSTEP for IMPROVE_GEO.
-    bad_trstep = (shortd .or. (.not. qred > 0) .or. (ratio <= eta1 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
-    !bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= eta1 .or. knew_tr == 0)  ! Works poorly!
+    bad_trstep = (shortd .or. trfail .or. (ratio <= eta1 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
+    !bad_trstep = (shortd .or. trfail .or. ratio <= eta1 .or. knew_tr == 0)  ! Works poorly!
     improve_geo = bad_trstep .and. .not. adequate_geo
     ! BAD_TRSTEP (for REDUCE_RHO): Is the last trust-region step bad?
-    bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= 0 .or. knew_tr == 0)  ! Performs better than the below from Powell.
-    !bad_trstep = (shortd .or. (.not. qred > 0) .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
+    bad_trstep = (shortd .or. trfail .or. ratio <= 0 .or. knew_tr == 0)  ! Performs better than the below from Powell.
+    !bad_trstep = (shortd .or. trfail .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
     reduce_rho = bad_trstep .and. adequate_geo .and. small_trrad
 
     ! Equivalently, REDUCE_RHO can be set as follows. It shows that REDUCE_RHO is TRUE in two cases.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
     ! !reduce_rho = (shortd .and. accurate_mod) .or. (bad_trstep .and. close_itpset .and. small_trrad)
 
     ! With REDUCE_RHO properly defined, we can also set IMPROVE_GEO as follows.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. (ratio <= eta1 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. (ratio <= eta1 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
     ! !improve_geo = bad_trstep .and. (.not. reduce_rho) .and. (.not. close_itpset)
 
     ! With IMPROVE_GEO properly defined, we can also set REDUCE_RHO as follows.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. (ratio <= 0 .and. ddmove <= 4.0_RP * delta**2) .or. knew_tr == 0)
     ! !reduce_rho = bad_trstep .and. (.not. improve_geo) .and. small_trrad
 
     ! UOBYQA never sets IMPROVE_GEO and REDUCE_RHO to TRUE simultaneously.
     !call assert(.not. (improve_geo .and. reduce_rho), 'IMPROVE_GEO and REDUCE_RHO are not both TRUE', srname)
     !
-    ! If SHORTD is TRUE or QRED > 0 is FALSE, then either IMPROVE_GEO or REDUCE_RHO is TRUE unless
-    ! CLOSE_ITPSET is TRUE but SMALL_TRRAD is FALSE.
-    !call assert((.not. shortd .and. qred > 0) .or. (improve_geo .or. reduce_rho .or. &
-    !    & (close_itpset .and. .not. small_trrad)), 'If SHORTD is TRUE or QRED > 0 is FALSE, then either&
+    ! If SHORTD or TRFAIL is TRUE, then either IMPROVE_GEO or REDUCE_RHO is TRUE unless CLOSE_ITPSET
+    ! is TRUE but SMALL_TRRAD is FALSE.
+    !call assert((.not. (shortd .or. trfail)) .or. (improve_geo .or. reduce_rho .or. &
+    !    & (close_itpset .and. .not. small_trrad)), 'If SHORTD or TRFAIL is TRUE, then either &
     !    & IMPROVE_GEO or REDUCE_RHO is TRUE unless CLOSE_ITPSET is TRUE but SMALL_TRRAD is FALSE', srname)
     !----------------------------------------------------------------------------------------------!
 
@@ -378,9 +392,11 @@ do tr = 1, maxtr
 
         ! DELBAR is the trust-region radius for the geometry improvement subproblem.
         ! Powell's UOBYQA code sets DELBAR = RHO, but NEWUOA/BOBYQA/LINCOA all take DELTA and/or
-        ! DISTSQ into consideration. The following DELBAR is copied from NEWUOA, and it seems to
-        ! improve the performance slightly according to a test on 20220720.
-        delbar = max(min(TENTH * sqrt(maxval(distsq)), HALF * delta), rho)
+        ! DISTSQ into consideration.
+        delbar = rho  ! Powell's code
+        !delbar = max(min(TENTH * sqrt(maxval(distsq)), HALF * delta), rho)  ! Powell's NEWUOA code
+        !delbar = max(TENTH * delta, rho)  ! Powell's LINCOA code
+        !delbar = max(min(TENTH * sqrt(maxval(distsq)), delta), rho)  ! Powell's BOBYQA code
 
         d = geostep(knew_geo, kopt, delbar, pl, xpt)
 
@@ -401,36 +417,35 @@ do tr = 1, maxtr
             exit
         end if
 
-        ! Update DNORMSAV and MODERRSAV.
-        ! DNORMSAV contains the DNORM of the latest 3 function evaluations with the current RHO.
+        ! Update DNORM_REC and MODERR_REC.
+        ! DNORM_REC records the DNORM of the latest 3 function evaluations with the current RHO.
         dnorm = min(delbar, norm(d))   ! In theory, DNORM = DELBAR in this case.
-        dnormsav = [dnormsav(2:size(dnormsav)), dnorm]
+        dnorm_rec = [dnorm_rec(2:size(dnorm_rec)), dnorm]
         ! MODERR is the error of the current model in predicting the change in F due to D.
-        ! MODERRSAV is the prediction errors of the latest 3 models with the current RHO.
+        ! MODERR_REC records the prediction errors of the latest 3 models with the current RHO.
         moderr = f - fval(kopt) - quadinc(pq, d, xpt(:, kopt))  ! QUADINC = Q(XOPT + D) - Q(XOPT)
-        moderrsav = [moderrsav(2:size(moderrsav)), moderr]
+        moderr_rec = [moderr_rec(2:size(moderr_rec)), moderr]
 
         ! Update PL, PQ, XPT, FVAL, and KOPT so that XPT(:, KNEW_GEO) becomes XOPT + D.
         call update(knew_geo, d, f, moderr, kopt, fval, pl, pq, xpt)
-    end if
+    end if  ! End of IF (IMPROVE_GEO). The procedure of improving geometry ends.
 
+    ! The calculations with the current RHO are complete. Enhance the resolution of the algorithm
+    ! by reducing RHO; update DELTA at the same time.
     if (reduce_rho) then
         if (rho <= rhoend) then
             info = SMALL_TR_RADIUS
             exit
         end if
-
-        ! Pick the next values of RHO and DELTA.
-        delta = HALF * rho
+        delta = max(HALF * rho, redrho(rho, rhoend))
         rho = redrho(rho, rhoend)
-        delta = max(delta, rho)
         ! Print a message about the reduction of RHO according to IPRINT.
         call rhomsg(solver, iprint, nf, delta, fval(kopt), rho, xbase + xpt(:, kopt))
-        ! DNORMSAV and MODERRSAV are corresponding to the latest 3 function evaluations with
+        ! DNORM_REC and MODERR_REC are corresponding to the latest 3 function evaluations with
         ! the current RHO. Update them after reducing RHO.
-        dnormsav = REALMAX
-        moderrsav = REALMAX
-    end if
+        dnorm_rec = REALMAX
+        moderr_rec = REALMAX
+    end if  ! End of IF (REDUCE_RHO). The procedure of reducing RHO ends.
 
     ! Shifting XBASE to the best point so far, and make the corresponding changes to the gradients
     ! of the Lagrange functions and the quadratic model. Powell's implementation does this each time
@@ -438,15 +453,15 @@ do tr = 1, maxtr
     if (sum(xpt(:, kopt)**2) >= 1.0E3_RP * delta**2) then
         call shiftbase(kopt, pl, pq, xbase, xpt)
     end if
-end do
+end do  ! End of DO TR = 1, MAXTR. The iterative procedure ends.
 
-! Return, possibly after another Newton-Raphson step, if it is too short to have been tried before.
+! Return from the calculation, after trying the Newton-Raphson step if it has not been tried yet.
 if (info == SMALL_TR_RADIUS .and. shortd .and. nf < maxfun) then
     x = xbase + (xpt(:, kopt) + d)
     call evaluate(calfun, x, f)
     nf = nf + 1_IK
     ! Print a message about the function evaluation according to IPRINT.
-    ! Zaikun 20230512: DELTA has been updated. RHO only indicative here. TO BE IMPROVED.
+    ! Zaikun 20230512: DELTA has been updated. RHO is only indicative here. TO BE IMPROVED.
     call fmsg(solver, 'Trust region', iprint, nf, rho, f, x)
     ! Save X, F into the history.
     call savehist(nf, x, xhist, f, fhist)

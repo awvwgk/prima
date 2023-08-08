@@ -39,14 +39,13 @@ module linalg_mod
 !
 ! Started: July 2020
 !
-! Last Modified: Monday, April 10, 2023 PM03:23:39
+! Last Modified: Sunday, July 16, 2023 PM11:51:27
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
 private
 public :: inprod, matprod, outprod ! Mathematically, INPROD = DOT_PRODUCT, MATPROD = MATMUL
 public :: r1update, r2update, symmetrize
-public :: Ax_plus_y
 public :: eye
 public :: diag
 public :: hypotenuse, planerot
@@ -1063,7 +1062,7 @@ function lsqr_Rfull(b, Q, R) result(x)
 ! This function solves the linear least squares problem min ||A*x - b||_2 by the QR factorization.
 ! This function is used in LINCOA, where,
 ! 1. The economy-size QR factorization is supplied externally (Q is called QFAC and R is called RFAC);
-! 3. R is non-singular.
+! 2. R is non-singular.
 !--------------------------------------------------------------------------------------------------!
 use, non_intrinsic :: consts_mod, only : RP, IK, EPS, DEBUGGING
 use, non_intrinsic :: debug_mod, only : assert
@@ -1724,53 +1723,6 @@ end if
 end subroutine symmetrize
 
 
-function Ax_plus_y(A, x, y) result(z)
-!--------------------------------------------------------------------------------------------------!
-! z = A*x + y (imagine x, y, and z as columns)
-!--------------------------------------------------------------------------------------------------!
-use, non_intrinsic :: consts_mod, only : RP, IK, DEBUGGING
-use, non_intrinsic :: debug_mod, only : assert
-implicit none
-
-! Inputs
-real(RP), intent(in) :: A(:, :)
-real(RP), intent(in) :: x(:)
-real(RP), intent(in) :: y(:)
-! Outputs
-real(RP) :: z(size(y))
-! Local variables
-character(len=*), parameter :: srname = 'AX_PLUS_Y'
-integer(IK) :: j
-
-! Preconditions
-if (DEBUGGING) then
-    call assert(size(x) == size(A, 2) .and. size(y) == size(A, 1), 'SIZE(A) == [SIZE(Y), SIZE(X)]', &
-        & srname)
-end if
-
-!====================!
-! Calculation starts !
-!====================!
-
-!--------------------------------------------------------------------------------------------------!
-! In BIGLAG of NEWUOA, the following loop works numerically better than Z = MATPROD(A, X) + Y. Why?
-!--------------------------------------------------------------------------------------------------!
-z = y
-do j = 1, int(size(A, 2), kind(j))
-    z = z + A(:, j) * x(j)
-end do
-
-!====================!
-!  Calculation ends  !
-!====================!
-
-! Postconditions
-if (DEBUGGING) then
-    call assert(size(z) == size(x), 'SIZE(Z) == SIZE(X)', srname)
-end if
-end function Ax_plus_y
-
-
 pure function isminor0(x, ref) result(is_minor)
 !--------------------------------------------------------------------------------------------------!
 ! This function tests whether X is minor compared to REF. It is used by Powell, e.g., in COBYLA.
@@ -2225,7 +2177,8 @@ end function logical_to_int
 
 function trueloc(x) result(loc)
 !--------------------------------------------------------------------------------------------------!
-! Similar to the `find` function in MATLAB, TRUELOC returns the indices where X is true.
+! Similar to the `find` function in MATLAB, TRUELOC returns the indices where X is true in
+! the ASCENDING order.
 ! The motivation for this function is the fact that Fortran does not support logical indexing. See,
 ! for example, https:
 ! 1. MATLAB, Python, Julia, and R support logical indexing, so that the Fortran code Y(TRUELOC(X))
@@ -2263,6 +2216,7 @@ if (DEBUGGING) then
     call assert(all(loc >= 1 .and. loc <= n), '1 <= LOC <= N', srname)
     call assert(size(loc) == count(x), 'SIZE(LOC) == COUNT(X)', srname)
     call assert(all(x(loc)), 'X(LOC) is all TRUE', srname)
+    call assert(all(loc(2:size(loc)) > loc(1:size(loc) - 1)), 'LOC is strictly ascending', srname)
 end if
 end function trueloc
 
@@ -2299,6 +2253,7 @@ if (DEBUGGING) then
     call assert(all(loc >= 1 .and. loc <= size(x)), '1 <= LOC <= N', srname)
     call assert(size(loc) == size(x) - count(x), 'SIZE(LOC) == SIZE(X) - COUNT(X)', srname)
     call assert(all(.not. x(loc)), 'X(LOC) is all FALSE', srname)
+    call assert(all(loc(2:size(loc)) > loc(1:size(loc) - 1)), 'LOC is strictly ascending', srname)
 end if
 end function falseloc
 
@@ -2824,7 +2779,7 @@ function eigmin_sym_trid(td, tn, tol) result(eig_min)
 ! The bisection algorithm for eigenvalues (not only the smallest) of symmetric tridiagonal matrices
 ! can be found in
 ! Barth, Martin, and Wilkinson, Calculation of the eigenvalues of a symmetric tridiagonal matrix by
-! the method of bisection, Numerische Mathematik 9, 386-- 393 (1967).
+! the method of bisection, Numerische Mathematik 9, 386--393 (1967).
 ! The algorithm is based on the sign changes of the Sturm sequence {P_i(LAMBDA)} defined in (1)--(2)
 ! of the above mentioned paper (P_i(LAMBDA) is the determinant of the i-th principle submatrix of
 ! the matrix minus LAMBDA*I), or the number of negative values of the Sturm-ratio sequence

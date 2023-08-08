@@ -16,6 +16,7 @@ jobs:
   test:
     name: Run armflang tests
     runs-on: [self-hosted, ARM64, pi64]
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
           submodules: recursive
@@ -37,11 +38,9 @@ jobs:
       - name: Conduct the test
         run: |
           #cd "$ROOT_DIR"/fortran/${{ matrix.solver }} && bash ./flint --all && bash ./mlint --all
-          cd "$ROOT_DIR"/fortran/tests
-          if [[ -f "test_cobyla.f90" ]] ; then
-              $SEDI 's|bign = 120|bign = 90|g' test_cobyla.f90
-          fi
-          export FFLAGS=${{ matrix.fflags }} && export TESTDIM=${{ matrix.testdim }} && make rtest_${{ matrix.ikind }}.${{ matrix.solver }}
+          export FFLAGS=${{ matrix.fflags }}
+          export TESTDIM=${{ matrix.testdim }}
+          cd "$ROOT_DIR"/fortran/tests && make rtest_${{ matrix.ikind }}.${{ matrix.solver }}
           cd "$ROOT_DIR"/fortran/examples/${{ matrix.solver }} && make rtest
 
       - name: Store artifacts
@@ -52,3 +51,20 @@ jobs:
 
       - name: Remove the test data
         run: rm -rf ${{ env.TEST_DIR }}
+
+  # The following job check whether the tests were successful or cancelled due to timeout.
+  # N.B.: Remember to specify `continue-on-error: true` for the job of the tests.
+  check_success_timeout:
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    needs: test
+    steps:
+      - name: Clone the GitHub actions scripts
+        uses: actions/checkout@v3.5.3
+        with:
+          repository: equipez/github_actions_scripts
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
+          path: scripts
+
+      - name: Check whether the tests were successful or cancelled due to timeout
+        run: bash scripts/check_success_timeout_big_test ${{ secrets.GITHUB_TOKEN }} ${{ github.repository }} ${{ github.run_id }}

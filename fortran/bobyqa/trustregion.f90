@@ -8,7 +8,7 @@ module trustregion_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Saturday, April 15, 2023 PM02:44:41
+! Last Modified: Monday, August 07, 2023 AM03:56:57
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -140,8 +140,7 @@ npt = int(size(pq_in), kind(npt))
 
 ! Preconditions
 if (DEBUGGING) then
-    call assert(n >= 1, 'N >= 1', srname)
-    call assert(npt >= n + 2, 'NPT >= N+2', srname)
+    call assert(n >= 1 .and. npt >= n + 2, 'N >= 1, NPT >= N + 2', srname)
     call assert(delta > 0, 'DELTA > 0', srname)
     call assert(size(hq_in, 1) == n .and. issymmetric(hq_in), 'HQ is n-by-n and symmetric', srname)
     call assert(size(pq_in) == npt, 'SIZE(PQ) == NPT', srname)
@@ -180,9 +179,10 @@ else
     scaled = .false.
 end if
 
-! The initial values of IACT, DREDSQ, and GGSAV are unused but to entertain Fortran compilers.
+! The initial values of IACT, DIACT, DREDSQ, and GGSAV are unused but to entertain Fortran compilers.
 ! TODO: Check that GGSAV has been initialized before used.
 iact = 0
+diact = ZERO
 dredsq = ZERO
 ggsav = ZERO
 
@@ -583,8 +583,6 @@ function interval_fun_trsbox(hangt, args) result(f)
 ! This function defines the objective function of the search for HANGT in TRSBOX, with HANGT being
 ! the TANGENT of HALF the angle of the "alternative iteration".
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack): NONE
-!--------------------------------------------------------------------------------------------------!
 use, non_intrinsic :: consts_mod, only : RP, ZERO, ONE, HALF, DEBUGGING
 use, non_intrinsic :: debug_mod, only : assert
 implicit none
@@ -626,8 +624,6 @@ end function interval_fun_trsbox
 function trrad(delta_in, dnorm, eta1, eta2, gamma1, gamma2, ratio) result(delta)
 !--------------------------------------------------------------------------------------------------!
 ! This function updates the trust region radius according to RATIO and DNORM.
-!--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack): NONE
 !--------------------------------------------------------------------------------------------------!
 
 ! Generic module

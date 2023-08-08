@@ -3,7 +3,7 @@ name: Test g95
 on:
   # Trigger the workflow on push or pull request
   #push:
-  #pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
+  pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
   # Trigger the workflow by cron. The default time zone of GitHub Actions is UTC.
   schedule:
     - cron: '0 5 * * *'
@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
           submodules: recursive

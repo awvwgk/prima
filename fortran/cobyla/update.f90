@@ -8,7 +8,7 @@ module update_mod
 !
 ! Started: July 2021
 !
-! Last Modified: Wednesday, March 08, 2023 PM03:09:19
+! Last Modified: Monday, August 07, 2023 AM03:53:59
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -23,14 +23,10 @@ subroutine updatexfc(jdrop, constr, cpen, cstrv, d, f, conmat, cval, fval, sim, 
 !--------------------------------------------------------------------------------------------------!
 ! This subroutine revises the simplex by updating the elements of SIM, SIMI, FVAL, CONMAT, and CVAL.
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: SIMI_JDROP(N)
-! Size of local arrays: REAL(RP)*N
-!--------------------------------------------------------------------------------------------------!
 
 ! Common modules
 use, non_intrinsic :: consts_mod, only : IK, RP, ONE, TENTH, DEBUGGING
-use, non_intrinsic :: infnan_mod, only : is_nan, is_neginf, is_posinf, is_finite
+use, non_intrinsic :: infnan_mod, only : is_nan, is_posinf, is_finite
 use, non_intrinsic :: infos_mod, only : INFO_DFT, DAMAGING_ROUNDING
 use, non_intrinsic :: linalg_mod, only : matprod, inprod, outprod, maximum, eye, inv, isinv
 use, non_intrinsic :: debug_mod, only : assert
@@ -78,12 +74,12 @@ if (DEBUGGING) then
     call assert(m >= 0, 'M >= 0', srname)
     call assert(n >= 1, 'N >= 1', srname)
     call assert(jdrop >= 0 .and. jdrop <= n + 1, '1 <= JDROP <= N+1', srname)
-    call assert(.not. any(is_nan(constr) .or. is_neginf(constr)), 'CONSTR does not contain NaN/-Inf', srname)
+    call assert(.not. any(is_nan(constr) .or. is_posinf(constr)), 'CONSTR does not contain NaN/+Inf', srname)
     call assert(.not. (is_nan(cstrv) .or. is_posinf(cstrv)), 'CSTRV is not NaN/+Inf', srname)
     call assert(size(d) == n .and. all(is_finite(d)), 'SIZE(D) == N, D is finite', srname)
     call assert(.not. (is_nan(f) .or. is_posinf(f)), 'F is not NaN/+Inf', srname)
     call assert(size(conmat, 1) == m .and. size(conmat, 2) == n + 1, 'SIZE(CONMAT) = [M, N+1]', srname)
-    call assert(.not. any(is_nan(conmat) .or. is_neginf(conmat)), 'CONMAT does not contain NaN/-Inf', srname)
+    call assert(.not. any(is_nan(conmat) .or. is_posinf(conmat)), 'CONMAT does not contain NaN/+Inf', srname)
     call assert(size(cval) == n + 1 .and. .not. any(cval < 0 .or. is_nan(cval) .or. is_posinf(cval)), &
         & 'SIZE(CVAL) == N+1 and CVAL does not contain negative values or NaN/+Inf', srname)
     call assert(size(fval) == n + 1 .and. .not. any(is_nan(fval) .or. is_posinf(fval)), &
@@ -154,7 +150,7 @@ end if
 ! Postconditions
 if (DEBUGGING) then
     call assert(size(conmat, 1) == m .and. size(conmat, 2) == n + 1, 'SIZE(CONMAT) = [M, N+1]', srname)
-    call assert(.not. any(is_nan(conmat) .or. is_neginf(conmat)), 'CONMAT does not contain NaN/-Inf', srname)
+    call assert(.not. any(is_nan(conmat) .or. is_posinf(conmat)), 'CONMAT does not contain NaN/+Inf', srname)
     call assert(size(cval) == n + 1 .and. .not. any(cval < 0 .or. is_nan(cval) .or. is_posinf(cval)), &
         & 'SIZE(CVAL) == N+1 and CVAL does not contain negative values or NaN/+Inf', srname)
     call assert(size(fval) == n + 1 .and. .not. any(is_nan(fval) .or. is_posinf(fval)), &
@@ -196,18 +192,12 @@ subroutine updatepole(cpen, conmat, cval, fval, sim, simi, info)
 ! need to call UPDATEPOLE after updating CPEN at the beginning of each trust-region iteration and
 ! after each invocation of REDRHO.
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: CONMAT_OLD(M, N+1), CVAL_OLD(N+1), FVAL_OLD(N+1), SIM_JDROP(N), SIM_OLD(N, N+1), &
-!    & SIMI_OLD(N, N), SIMI_TEST(N, N)
-! Size of local arrays: REAL(RP)*((M+N+2)*(N+1) + N + 2*N^2)  (TO BE REDUCED TO 2*N +N^2 by removing
-! *_OLD. Should we allocate SIMI_TEST? Yes, it is needed quite rarely!)
-!--------------------------------------------------------------------------------------------------!
 
 ! Common modules
 use, non_intrinsic :: consts_mod, only : IK, RP, ZERO, ONE, TENTH, DEBUGGING
 use, non_intrinsic :: infos_mod, only : DAMAGING_ROUNDING, INFO_DFT
 use, non_intrinsic :: debug_mod, only : assert
-use, non_intrinsic :: infnan_mod, only : is_nan, is_neginf, is_posinf, is_finite
+use, non_intrinsic :: infnan_mod, only : is_nan, is_posinf, is_finite
 use, non_intrinsic :: linalg_mod, only : matprod, eye, inv, isinv, maximum
 
 implicit none
@@ -244,11 +234,11 @@ n = int(size(sim, 1), kind(n))
 
 ! Preconditions
 if (DEBUGGING) then
-    call assert(cpen >= 0, 'CPEN >= 0', srname)
     call assert(m >= 0, 'M >= 0', srname)
     call assert(n >= 1, 'N >= 1', srname)
+    call assert(cpen > 0, 'CPEN > 0', srname)
     call assert(size(conmat, 1) == m .and. size(conmat, 2) == n + 1, 'SIZE(CONMAT) = [M, N+1]', srname)
-    call assert(.not. any(is_nan(conmat) .or. is_neginf(conmat)), 'CONMAT does not contain NaN/-Inf', srname)
+    call assert(.not. any(is_nan(conmat) .or. is_posinf(conmat)), 'CONMAT does not contain NaN/+Inf', srname)
     call assert(size(cval) == n + 1 .and. .not. any(cval < 0 .or. is_nan(cval) .or. is_posinf(cval)), &
         & 'SIZE(CVAL) == N+1 and CVAL does not contain negative values or NaN/+Inf', srname)
     call assert(size(fval) == n + 1 .and. .not. any(is_nan(fval) .or. is_posinf(fval)), &
@@ -328,7 +318,7 @@ if (DEBUGGING) then
     call assert(findpole(cpen, cval, fval) == n + 1 .or. info == DAMAGING_ROUNDING, &
         & 'The best point is SIM(:, N+1) unless the rounding is damaging', srname)
     call assert(size(conmat, 1) == m .and. size(conmat, 2) == n + 1, 'SIZE(CONMAT) = [M, N+1]', srname)
-    call assert(.not. any(is_nan(conmat) .or. is_neginf(conmat)), 'CONMAT does not contain NaN/-Inf', srname)
+    call assert(.not. any(is_nan(conmat) .or. is_posinf(conmat)), 'CONMAT does not contain NaN/+Inf', srname)
     call assert(size(cval) == n + 1 .and. .not. any(cval < 0 .or. is_nan(cval) .or. is_posinf(cval)), &
         & 'SIZE(CVAL) == N+1 and CVAL does not contain negative values or NaN/+Inf', srname)
     call assert(size(fval) == n + 1 .and. .not. any(is_nan(fval) .or. is_posinf(fval)), &
@@ -351,10 +341,6 @@ function findpole(cpen, cval, fval) result(jopt)
 ! This subroutine identifies the best vertex of the current simplex with respect to the merit
 ! function PHI = F + CPEN * CSTRV.
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: PHI(N+1)
-! Size of local arrays: REAL(RP)*(N+1)
-!--------------------------------------------------------------------------------------------------!
 
 ! Common modules
 use, non_intrinsic :: consts_mod, only : IK, RP, DEBUGGING
@@ -365,8 +351,8 @@ implicit none
 
 ! Inputs
 real(RP), intent(in) :: cpen
-real(RP), intent(inout) :: cval(:)  ! CVAL(N+1)
-real(RP), intent(inout) :: fval(:)  ! FVAL(N+1)
+real(RP), intent(in) :: cval(:)  ! CVAL(N+1)
+real(RP), intent(in) :: fval(:)  ! FVAL(N+1)
 
 ! Outputs
 integer(IK) :: jopt
@@ -382,7 +368,7 @@ n = int(size(fval) - 1, kind(n))
 
 ! Preconditions
 if (DEBUGGING) then
-    call assert(cpen >= 0, 'CPEN >= 0', srname)
+    call assert(cpen > 0, 'CPEN > 0', srname)
     call assert(size(cval) == n + 1 .and. .not. any(cval < 0 .or. is_nan(cval) .or. is_posinf(cval)), &
         & 'SIZE(CVAL) == N+1 and CVAL does not contain negative values or NaN/+Inf', srname)
     call assert(size(fval) == n + 1 .and. .not. any(is_nan(fval) .or. is_posinf(fval)), &
@@ -397,14 +383,11 @@ end if
 jopt = int(size(fval), kind(jopt))  ! We use N + 1 as the default value of JOPT.
 phi = fval + cpen * cval
 phimin = minval(phi)
-if (phimin < phi(jopt)) then  ! We keep JOPT = N + 1 unless there is a strictly better choice.
-    jopt = int(minloc(phi, dim=1), kind(jopt))
-end if
-if (cpen <= 0 .and. any(cval < cval(jopt) .and. phi <= phimin)) then
-    ! (CPEN <= 0) is indeed (CPEN == ZERO), and (PHI <= PHIMIN) is indeed (PHI == PHIMIN).
-    ! We code in this way to avoid equality comparison of real numbers.
+! Essentially, JOPT = MINLOC(PHI). However, we keep JOPT = N + 1 unless there is a strictly better
+! choice. When there are multiple choices, we choose the JOPT with the smallest value of CVAL.
+if (phimin < phi(jopt) .or. any(cval < cval(jopt) .and. phi <= phi(jopt))) then
     jopt = int(minloc(cval, mask=(phi <= phimin), dim=1), kind(jopt))
-    !!MATLAB: cmin = min(cval(phi <= phimin)); jopt = find(phi <= phimin & ~(cval > cmin), 1, 'first');
+    !!MATLAB: cmin = min(cval(phi <= phimin)); jopt = find(phi <= phimin & cval <= cmin, 1, 'first');
 end if
 
 !====================!
@@ -414,6 +397,8 @@ end if
 ! Postconditions
 if (DEBUGGING) then
     call assert(jopt >= 1 .and. jopt <= n + 1, '1 <= JOPT <= N+1', srname)
+    call assert(jopt == n + 1 .or. phi(jopt) < phi(n + 1) .or. (phi(jopt) <= phi(n + 1) .and. cval(jopt) < cval(n + 1)), &
+        & 'JOPT = N+1 unless PHI(JOPT) < PHI(N+1) or PHI(JOPT) <= PHI(N+1) and CVAL(JOPT) < CVAL(N+1)', srname)
 end if
 end function findpole
 

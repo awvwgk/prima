@@ -3,7 +3,7 @@ name: Test gfortran, -fast
 on:
   # Trigger the workflow on push or pull request
   #push:
-  #pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
+  pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
   # Trigger the workflow by cron. The default time zone of GitHub Actions is UTC.
   schedule:
     - cron: '0 16 4-31/4 * *'
@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           submodules: recursive
         #   ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
@@ -74,7 +74,6 @@ jobs:
                 export FFLAGS='-fast'
                 cd "$ROOT_DIR"/fortran/tests && make gtest_${{ matrix.ikind }}_c.${{ matrix.solver }} && make gtest_${{ matrix.ikind }}.${{ matrix.solver }}
             fi
-            if (( ${{ matrix.version }} < 8 )) ; then export FS=08; else export FS=18; fi  # Needed by the next line; `-f2018` is not implemented until gcc-8
             cd "$ROOT_DIR"/fortran/examples/${{ matrix.solver }} && make gtest
 
       - name: Store artifacts

@@ -15,7 +15,7 @@ module lincob_mod
 !
 ! Started: February 2022
 !
-! Last Modified: Friday, May 12, 2023 PM06:49:39
+! Last Modified: Friday, August 04, 2023 PM09:53:21
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -26,17 +26,17 @@ public :: lincob
 contains
 
 
-subroutine lincob(calfun, iprint, maxfilt, maxfun, npt, A_orig, amat, b_orig, bvec, ctol, cweight, &
-    & eta1, eta2, ftarget, gamma1, gamma2, rhobeg, rhoend, x, nf, chist, cstrv, f, fhist, xhist, info)
+subroutine lincob(calfun, iprint, maxfilt, maxfun, npt, Aeq, Aineq, amat, beq, bineq, bvec, &
+    & ctol, cweight, eta1, eta2, ftarget, gamma1, gamma2, rhobeg, rhoend, xl, xu, x, nf, chist, &
+    & cstrv, f, fhist, xhist, info)
 !--------------------------------------------------------------------------------------------------!
 ! This subroutine performs the actual calculations of LINCOA.
 !
-! The arguments IPRINT, MAXFILT, MAXFUN, MAXHIST, NPT, CTOL, CWEIGHT, ETA1, ETA2, FTARGET, GAMMA1,
-! GAMMA2, RHOBEG, RHOEND, X, NF, F, XHIST, FHIST, CHIST, CSTRV and INFO are identical to the
-! corresponding arguments in subroutine LINCOA.
+! The arguments IPRINT, MAXFILT, MAXFUN, MAXHIST, NPT, AEQ, AINEQ, BEQ, BINEQ, CTOL, CWEIGHT, ETA1,
+! ETA2, FTARGET, GAMMA1, GAMMA2, RHOBEG, RHOEND, X, NF, F, XHIST, FHIST, CHIST, CSTRV and INFO are
+! identical to the corresponding arguments in subroutine LINCOA.
 ! AMAT is a matrix whose columns are the constraint gradients, scaled so that they have unit length.
-! B contains on entry the right hand sides of the constraints, scaled as above, but later B is
-!   modified for variables relative to XBASE.
+! BVEC contains on entry the right hand sides of the constraints, scaled as above.
 ! XBASE holds a shift of origin that should reduce the contributions from rounding errors to values
 !   of the model and Lagrange functions.
 ! XOPT is the displacement from XBASE of the feasible vector of variables that provides the least
@@ -79,7 +79,8 @@ use, non_intrinsic :: evaluate_mod, only : evaluate
 use, non_intrinsic :: history_mod, only : savehist, rangehist
 use, non_intrinsic :: infnan_mod, only : is_nan, is_posinf
 use, non_intrinsic :: infos_mod, only : INFO_DFT, MAXTR_REACHED, SMALL_TR_RADIUS
-use, non_intrinsic :: linalg_mod, only : matprod, maximum, eye, trueloc, linspace, norm
+use, non_intrinsic :: linalg_mod, only : matprod, maximum, eye, trueloc, linspace, norm, trueloc
+use, non_intrinsic :: memory_mod, only : safealloc
 use, non_intrinsic :: message_mod, only : fmsg, rhomsg, retmsg
 use, non_intrinsic :: pintrf_mod, only : OBJ
 use, non_intrinsic :: powalg_mod, only : quadinc, omega_mul, hess_mul, updateh
@@ -102,10 +103,12 @@ integer(IK), intent(in) :: iprint
 integer(IK), intent(in) :: maxfilt
 integer(IK), intent(in) :: maxfun
 integer(IK), intent(in) :: npt
-real(RP), intent(in) :: A_orig(:, :)  ! A_ORIG(N, M) ; Better names? necessary?
-real(RP), intent(in) :: amat(:, :)  ! AMAT(N, M) ; Better names? necessary?
-real(RP), intent(in) :: b_orig(:) ! B_ORIG(M) ; Better names? necessary?
-real(RP), intent(in) :: bvec(:)  ! BVEC(M) ; Better names? necessary?
+real(RP), intent(in) :: Aeq(:, :)  ! Aeq(Meq, N)
+real(RP), intent(in) :: Aineq(:, :)  ! Aineq(Mineq, N)
+real(RP), intent(in) :: amat(:, :)  ! AMAT(N, M)
+real(RP), intent(in) :: beq(:) ! Beq(Meq)
+real(RP), intent(in) :: bineq(:) ! Bineq(Mineq)
+real(RP), intent(in) :: bvec(:)  ! BVEC(M)
 real(RP), intent(in) :: ctol
 real(RP), intent(in) :: cweight
 real(RP), intent(in) :: eta1
@@ -115,6 +118,8 @@ real(RP), intent(in) :: gamma1
 real(RP), intent(in) :: gamma2
 real(RP), intent(in) :: rhobeg
 real(RP), intent(in) :: rhoend
+real(RP), intent(in) :: xl(:)
+real(RP), intent(in) :: xu(:)
 
 ! In-outputs
 real(RP), intent(inout) :: x(:)  ! X(N)
@@ -131,7 +136,7 @@ real(RP), intent(out) :: xhist(:, :)  ! XHIST(N, MAXXHIST)
 ! Local variables
 character(len=*), parameter :: solver = 'LINCOA'
 character(len=*), parameter :: srname = 'LINCOB'
-integer(IK) :: iact(size(b_orig))
+integer(IK) :: iact(size(bvec))
 integer(IK) :: idz
 integer(IK) :: ij(2, max(0_IK, int(npt - 2 * size(x) - 1, IK)))
 integer(IK) :: k
@@ -151,6 +156,8 @@ integer(IK) :: ngetact
 integer(IK) :: nhist
 integer(IK) :: subinfo
 integer(IK) :: tr
+integer(IK), allocatable :: ixl(:)
+integer(IK), allocatable :: ixu(:)
 logical :: accurate_mod
 logical :: adequate_geo
 logical :: bad_trstep
@@ -162,17 +169,19 @@ logical :: qalt_better(3)
 logical :: reduce_rho
 logical :: shortd
 logical :: small_trrad
+logical :: trfail
 logical :: ximproved
-real(RP) :: b(size(b_orig))
+real(RP) :: b(size(bvec))
 real(RP) :: bmat(size(x), npt + size(x))
 real(RP) :: cfilt(maxfilt)
-real(RP) :: constr(size(b_orig))
+real(RP) :: constr(count(xl > -REALMAX) + count(xu < REALMAX) + 2 * size(beq) + size(bineq))
+real(RP) :: constr_leq(size(beq))
 real(RP) :: d(size(x))
 real(RP) :: delbar
 real(RP) :: delta
 real(RP) :: distsq(npt)
 real(RP) :: dnorm
-real(RP) :: dnormsav(4)  ! Powell's implementation uses 5
+real(RP) :: dnorm_rec(4)  ! Powell's implementation uses 5
 real(RP) :: ffilt(maxfilt)
 real(RP) :: fval(npt), cval(npt)
 real(RP) :: galt(size(x))
@@ -186,7 +195,7 @@ real(RP) :: pqalt(npt)
 real(RP) :: qfac(size(x), size(x))
 real(RP) :: qred
 real(RP) :: ratio
-real(RP) :: rescon(size(b_orig))
+real(RP) :: rescon(size(bvec))
 real(RP) :: rfac(size(x), size(x))
 real(RP) :: rho
 real(RP) :: xbase(size(x))
@@ -197,7 +206,7 @@ real(RP) :: xpt(size(x), npt)
 real(RP) :: zmat(npt, npt - size(x) - 1)
 
 ! Sizes.
-m = int(size(b_orig), kind(m))
+m = int(size(bvec), kind(m))
 n = int(size(x), kind(n))
 maxxhist = int(size(xhist, 2), kind(maxxhist))
 maxfhist = int(size(fhist), kind(maxfhist))
@@ -211,12 +220,13 @@ if (DEBUGGING) then
     call assert(n >= 1, 'N >= 1', srname)
     call assert(npt >= n + 2, 'NPT >= N+2', srname)
     call assert(maxfun >= npt + 1, 'MAXFUN >= NPT+1', srname)
-    call assert(size(A_orig, 1) == n .and. size(A_orig, 2) == m, 'SIZE(A_ORIG) == [N, M]', srname)
-    call assert(size(bvec) == m, 'SIZE(BVEC) == M', srname)
+    call assert(size(Aeq, 1) == size(beq) .and. size(Aeq, 2) == n, 'SIZE(Aeq) == [SIZE(Beq), N]', srname)
+    call assert(size(Aineq, 1) == size(bineq) .and. size(Aineq, 2) == n, 'SIZE(Aineq) == [SIZE(Bineq), N]', srname)
     call assert(size(amat, 1) == n .and. size(amat, 2) == m, 'SIZE(AMAT) == [N, M]', srname)
-    call assert(rhobeg >= rhoend .and. rhoend > 0, 'RHOBEG >= RHOEND > 0', srname)
     call assert(eta1 >= 0 .and. eta1 <= eta2 .and. eta2 < 1, '0 <= ETA1 <= ETA2 < 1', srname)
     call assert(gamma1 > 0 .and. gamma1 < 1 .and. gamma2 > 1, '0 < GAMMA1 < 1 < GAMMA2', srname)
+    call assert(rhobeg >= rhoend .and. rhoend > 0, 'RHOBEG >= RHOEND > 0', srname)
+    call assert(size(xl) == n .and. size(xu) == n, 'SIZE(XL) == N == SIZE(XU)', srname)
     call assert(maxfilt >= min(MIN_MAXFILT, maxfun) .and. maxfilt <= maxfun, &
         & 'MIN(MIN_MAXFILT, MAXFUN) <= MAXFILT <= MAXFUN', srname)
     call assert(maxhist >= 0 .and. maxhist <= maxfun, '0 <= MAXHIST <= MAXFUN', srname)
@@ -230,17 +240,24 @@ end if
 ! Calculation starts !
 !====================!
 
-! Initialize XBASE, XPT, FVAL, and KOPT.
+! IXL and IXU are the indices of the nontrivial lower and upper bounds, respectively.
+call safealloc(ixl, int(count(xl > -REALMAX), IK))  ! Removable in F2003.
+call safealloc(ixu, int(count(xu < REALMAX), IK))   ! Removable in F2003.
+ixl = trueloc(xl > -REALMAX)
+ixu = trueloc(xu < REALMAX)
+
+! Initialize B, XBASE, XPT, FVAL, CVAL, and KOPT, together with the history, NF, IJ, and EVALUATED.
 b = bvec
-call initxf(calfun, iprint, maxfun, A_orig, amat, b_orig, ctol, ftarget, rhobeg, x, b, &
-    & ij, kopt, nf, chist, cval, fhist, fval, xbase, xhist, xpt, evaluated, subinfo)
+call initxf(calfun, iprint, maxfun, Aeq, Aineq, amat, beq, bineq, ctol, ftarget, rhobeg, xl, xu, &
+    & x, b, ij, kopt, nf, chist, cval, fhist, fval, xbase, xhist, xpt, evaluated, subinfo)
+
+! Initialize X, F, CONSTR, and CSTRV according to KOPT.
+! N.B.: We must set CONSTR and CSTRV. Otherwise, if REDUCE_RHO is TRUE after the very first
+! iteration due to SHORTD, then RHOMSG will be called with CONSTR and CSTRV uninitialized.
 x = xbase + xpt(:, kopt)
 f = fval(kopt)
-
-! Evaluate the constraints using A_ORIG and B_ORIG. Should we do this in INITXF?
-! N.B.: We must initialize CONSTR and CSTRV. Otherwise, if REDUCE_RHO is TRUE after the very first
-! iteration due to SHORTD, then RHOMSG will be called with CONSTR and CSTRV uninitialized.
-constr = matprod(x, A_orig) - b_orig
+constr_leq = matprod(Aeq, x) - beq
+constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
 cstrv = maximum([ZERO, constr])
 
 ! Initialize the filter, including XFILT, FFILT, CONFILT, CFILT, and NFILT.
@@ -264,15 +281,16 @@ if (subinfo /= INFO_DFT) then
     kopt = selectx(ffilt(1:nfilt), cfilt(1:nfilt), cweight, ctol)
     x = xfilt(:, kopt)
     f = ffilt(kopt)
-    constr = matprod(x, A_orig) - b_orig
+    constr_leq = matprod(Aeq, x) - beq
+    constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
     cstrv = maximum([ZERO, constr])
+    call retmsg(solver, info, iprint, nf, f, x, cstrv, constr)
     ! Arrange CHIST, FHIST, and XHIST so that they are in the chronological order.
     call rangehist(nf, xhist, fhist, chist)
-    call retmsg(solver, info, iprint, nf, f, x, cstrv, constr)
     return
 end if
 
-! Initialize BMAT, ZMAT, and IDZ.
+! Initialize [BMAT, ZMAT, IDZ], representing the inverse of the KKT matrix of the interpolation system.
 call inith(ij, xpt, idz, bmat, zmat)
 
 ! Initialize the quadratic represented by [GOPT, HQ, PQ], so that its gradient at XBASE+XOPT is
@@ -290,15 +308,16 @@ rescon(trueloc(rescon >= rhobeg)) = -rescon(trueloc(rescon >= rhobeg))
 
 ! Set some more initial values.
 ! We must initialize RATIO. Otherwise, when SHORTD = TRUE, compilers may raise a run-time error that
-! RATIO is undefined. The value will not be used: when SHORTD = FALSE, its value will be overwritten;
-! when SHORTD = TRUE, its value is used only in BAD_TRSTEP, which is TRUE regardless of RATIO.
-! Similar for KNEW_TR.
+! RATIO is undefined. But its value will not be used: when SHORTD = FALSE, its value will be
+! overwritten; when SHORTD = TRUE, its value is used only in BAD_TRSTEP, which is TRUE regardless of
+! RATIO. Similar for KNEW_TR.
 ! No need to initialize SHORTD unless MAXTR < 1, but some compilers may complain if we do not do it.
 rho = rhobeg
 delta = rho
 ratio = -ONE
-dnormsav = REALMAX
+dnorm_rec = REALMAX
 shortd = .false.
+trfail = .false.
 qalt_better = .false.
 knew_tr = 0
 knew_geo = 0
@@ -312,6 +331,8 @@ iact = linspace(1_IK, m, m)
 ! Then TRRAD will update DELTA to GAMMA2*RHO. If GAMMA3 >= GAMMA2, then DELTA will be reset to RHO,
 ! which is not reasonable as D is very successful. See paragraph two of Sec. 5.2.5 in
 ! T. M. Ragonneau's thesis: "Model-Based Derivative-Free Optimization Methods and Software".
+! According to test on 20230613, for LINCOA, this Powellful updating scheme of DELTA works evidently
+! better than setting directly DELTA = MAX(NEW_DELTA, RHO).
 gamma3 = max(ONE, min(0.75_RP * gamma2, 1.5_RP))
 
 ! MAXTR is the maximal number of trust-region iterations. Each trust-region iteration takes 1 or 2
@@ -346,26 +367,28 @@ do tr = 1, maxtr
     ! !SHORTD = (DNORM < HALF * RHO)
     !------------------------------------------------------------------------------------------!
 
-    ! DNORMSAV saves the DNORM of last few (five) trust-region iterations. It will be used to
+    ! DNORM_REC records the DNORM of last few (five) trust-region iterations. It will be used to
     ! decide whether we should improve the geometry of the interpolation set or reduce RHO when
     ! SHORTD is TRUE. Note that it does not record the geometry steps.
-    dnormsav = [dnormsav(2:size(dnormsav)), dnorm]
+    dnorm_rec = [dnorm_rec(2:size(dnorm_rec)), dnorm]
 
-    ! In some cases, we reset DNORMSAV to REALMAX. This indicates a preference of improving the
-    ! geometry of the interpolation set to reducing RHO in the subsequent three or more
-    ! iterations. This is important for the performance of LINCOA.
+    ! In some cases, we reset DNORM_REC to REALMAX. This indicates a preference of improving the
+    ! geometry of the interpolation set to reducing RHO in the subsequent three or more iterations.
+    ! This is important for the performance of LINCOA.
+    ! Zaikun 20230609: This does not exist in NEWUOA/BOBYQA/UOBYQA. Try it!
     if (delta > rho .or. .not. shortd) then  ! Another possibility: IF (DELTA > RHO) THEN
-        dnormsav = REALMAX
+        dnorm_rec = REALMAX
     end if
 
     ! Set QRED to the reduction of the quadratic model when the move D is made from XOPT. QRED
     ! should be positive If it is nonpositive due to rounding errors, we will not take this step.
     qred = -quadinc(d, xpt, gopt, pq, hq)  ! QRED = Q(XOPT) - Q(XOPT + D)
+    trfail = (.not. qred > 1.0E-5 * rho**2)  ! QRED is tiny/negative or NaN.
 
-    if (shortd .or. .not. qred > 0) then
+    if (shortd .or. trfail) then
         ! In this case, do nothing but reducing DELTA. Afterward, DELTA < DNORM may occur.
         ! N.B.: 1. This value of DELTA will be discarded if REDUCE_RHO turns out TRUE later.
-        ! 2. Powell's code does not shrink DELTA when QRED > 0 is FALSE (i.e., when VQUAD >= 0 in
+        ! 2. Powell's code does not shrink DELTA when TRFAIL is TRUE (i.e., when VQUAD >= 0 in
         ! Powell's code, where VQUAD = -QRED). Consequently, the algorithm may be stuck in an
         ! infinite cycling, because both REDUCE_RHO and IMPROVE_GEO may end up with FALSE in this
         ! case, which did happen in tests.
@@ -380,8 +403,9 @@ do tr = 1, maxtr
         call evaluate(calfun, x, f)
         nf = nf + 1_IK
 
-        ! Evaluate the constraints using A_ORIG and B_ORIG.
-        constr = matprod(x, A_orig) - b_orig
+        ! Evaluate the constraints. They are used only for printing messages.
+        constr_leq = matprod(Aeq, x) - beq
+        constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
         cstrv = maximum([ZERO, constr])
 
         ! Print a message about the function evaluation according to IPRINT.
@@ -441,7 +465,7 @@ do tr = 1, maxtr
             call updateres(ximproved, amat, b, delta, norm(d), xpt(:, kopt), rescon)
         end if
 
-    end if  ! End of IF (SHORTD .OR. .NOT. QRED > 0). The normal trust-region calculation ends here.
+    end if  ! End of IF (SHORTD .OR. TRFAIL). The normal trust-region calculation ends.
 
     !----------------------------------------------------------------------------------------------!
     ! Before the next trust-region iteration, we may improve the geometry of XPT or reduce RHO
@@ -460,18 +484,18 @@ do tr = 1, maxtr
     ! verify a curvature condition that really indicates that recent models are sufficiently
     ! accurate. Here, however, we are not really sure whether they are accurate or not. Therefore,
     ! ACCURATE_MOD is not the best name, but we keep it to align with the other solvers.
-    accurate_mod = all(dnormsav <= HALF * rho) .or. all(dnormsav(3:size(dnormsav)) <= 0.2 * rho)
-    ! Powell's version (note that size(dnormsav) = 5 in his implementation):
-    !accurate_mod = all(dnormsav <= HALF * rho) .or. all(dnormsav(3:size(dnormsav)) <= TENTH * rho)
+    accurate_mod = all(dnorm_rec <= HALF * rho) .or. all(dnorm_rec(3:size(dnorm_rec)) <= 0.2 * rho)
+    ! Powell's version (note that size(dnorm_rec) = 5 in his implementation):
+    !accurate_mod = all(dnorm_rec <= HALF * rho) .or. all(dnorm_rec(3:size(dnorm_rec)) <= TENTH * rho)
     ! CLOSE_ITPSET: Are the interpolation points close to XOPT?
     distsq = sum((xpt - spread(xpt(:, kopt), dim=2, ncopies=npt))**2, dim=1)
     !!MATLAB: distsq = sum((xpt - xpt(:, kopt)).^2)  % Implicit expansion
-    close_itpset = all(distsq <= 4.0_RP * delta**2)  ! Behaves the same as Powell's version.
+    close_itpset = all(distsq <= 4.0_RP * delta**2)  ! Powell's NEWUOA code.
     ! Below are some alternative definitions of CLOSE_ITPSET.
+    ! N.B.: The threshold for CLOSE_ITPSET is at least DELBAR, the trust region radius for GEOSTEP.
+    ! !close_itpset = all(distsq <= 4.0_RP * rho**2)  ! Powell's UOBYQA code.
     ! !close_itpset = all(distsq <= max(delta**2, 4.0_RP * rho**2))  ! Powell's code.
-    ! !close_itpset = all(distsq <= delta**2)  ! Does not work as well as Powell's version.
-    ! !close_itpset = all(distsq <= 10.0_RP * delta**2)  ! Does not work as well as Powell's version.
-    ! !close_itpset = all(distsq <= max((2.0_RP * delta)**2, (10.0_RP * rho)**2))  ! Powell's BOBYQA.
+    ! !close_itpset = all(distsq <= max((TWO * delta)**2, (TEN * rho)**2))  ! Powell's BOBYQA code.
     ! ADEQUATE_GEO: Is the geometry of the interpolation set "adequate"?
     adequate_geo = (shortd .and. accurate_mod) .or. close_itpset
     ! SMALL_TRRAD: Is the trust-region radius small? This indicator seems not impactive in practice.
@@ -482,31 +506,31 @@ do tr = 1, maxtr
     ! N.B.: If SHORTD is TRUE at the very first iteration, then REDUCE_RHO will be set to TRUE.
 
     ! BAD_TRSTEP (for IMPROVE_GEO): Is the last trust-region step bad?
-    bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= eta1 .or. knew_tr == 0)
+    bad_trstep = (shortd .or. trfail .or. ratio <= eta1 .or. knew_tr == 0)
     improve_geo = bad_trstep .and. .not. adequate_geo
     ! BAD_TRSTEP (for REDUCE_RHO): Is the last trust-region step bad?
-    bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= 0 .or. knew_tr == 0)
+    bad_trstep = (shortd .or. trfail .or. ratio <= 0 .or. knew_tr == 0)
     reduce_rho = bad_trstep .and. adequate_geo .and. small_trrad
 
     ! Equivalently, REDUCE_RHO can be set as follows. It shows that REDUCE_RHO is TRUE in two cases.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= 0 .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. ratio <= 0 .or. knew_tr == 0)
     ! !reduce_rho = (shortd .and. accurate_mod) .or. (bad_trstep .and. close_itpset .and. small_trrad)
 
     ! With REDUCE_RHO properly defined, we can also set IMPROVE_GEO as follows.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= eta1 .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. ratio <= eta1 .or. knew_tr == 0)
     ! !improve_geo = bad_trstep .and. (.not. reduce_rho) .and. (.not. close_itpset)
 
     ! With IMPROVE_GEO properly defined, we can also set REDUCE_RHO as follows.
-    ! !bad_trstep = (shortd .or. (.not. qred > 0) .or. ratio <= 0 .or. knew_tr == 0)
+    ! !bad_trstep = (shortd .or. trfail .or. ratio <= 0 .or. knew_tr == 0)
     ! !reduce_rho = bad_trstep .and. (.not. improve_geo) .and. small_trrad
 
     ! LINCOA never sets IMPROVE_GEO and REDUCE_RHO to TRUE simultaneously.
     !call assert(.not. (improve_geo .and. reduce_rho), 'IMPROVE_GEO and REDUCE_RHO are not both TRUE', srname)
     !
-    ! If SHORTD is TRUE or QRED > 0 is FALSE, then either REDUCE_RHO or IMPROVE_GEO is TRUE unless
-    ! CLOSE_ITPSET is TRUE but SMALL_TRRAD is FALSE.
-    !call assert((.not. shortd .and. qred > 0) .or. (improve_geo .or. reduce_rho .or. &
-    !    & (close_itpset .and. .not. small_trrad)), 'If SHORTD is TRUE or QRED > 0 is FALSE, then either&
+    ! If SHORTD or TRFAIL is TRUE, then either IMPROVE_GEO or REDUCE_RHO is TRUE unless CLOSE_ITPSET
+    ! is TRUE but SMALL_TRRAD is FALSE.
+    !call assert((.not. (shortd .or. trfail)) .or. (improve_geo .or. reduce_rho .or. &
+    !    & (close_itpset .and. .not. small_trrad)), 'If SHORTD or TRFAIL is TRUE, then either &
     !    & IMPROVE_GEO or REDUCE_RHO is TRUE unless CLOSE_ITPSET is TRUE but SMALL_TRRAD is FALSE', srname)
     !----------------------------------------------------------------------------------------------!
 
@@ -520,7 +544,10 @@ do tr = 1, maxtr
 
         ! Set DELBAR, which will be used as the trust-region radius for the geometry-improving
         ! scheme GEOSTEP. Note that DELTA has been updated before arriving here.
-        delbar = max(TENTH * delta, rho)  ! This differs from NEWUOA/BOBYQA. Possible improvement?
+        delbar = max(TENTH * delta, rho)  ! Powell's code
+        !delbar = rho  ! Powell's UOBYQA code
+        !delbar = max(min(TENTH * sqrt(maxval(distsq)), HALF * delta), rho)  ! Powell's NEWUOA code
+        !delbar = max(min(TENTH * sqrt(maxval(distsq)), delta), rho)  ! Powell's BOBYQA code
         ! Find D so that the geometry of XPT will be improved when XPT(:, KNEW_GEO) becomes XOPT + D.
         call geostep(iact, idz, knew_geo, kopt, nact, amat, bmat, delbar, qfac, rescon, xpt, zmat, feasible, d)
 
@@ -529,8 +556,9 @@ do tr = 1, maxtr
         call evaluate(calfun, x, f)
         nf = nf + 1_IK
 
-        ! Evaluate the constraints using A_ORIG and B_ORIG.
-        constr = matprod(x, A_orig) - b_orig
+        ! Evaluate the constraints. They are used only for printing messages.
+        constr_leq = matprod(Aeq, x) - beq
+        constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
         cstrv = maximum([ZERO, constr])
 
         ! Print a message about the function evaluation according to IPRINT.
@@ -585,14 +613,13 @@ do tr = 1, maxtr
             info = SMALL_TR_RADIUS
             exit
         end if
-        delta = HALF * rho
+        delta = max(HALF * rho, redrho(rho, rhoend))
         rho = redrho(rho, rhoend)
-        delta = max(delta, rho)
         ! Print a message about the reduction of RHO according to IPRINT.
         call rhomsg(solver, iprint, nf, delta, fval(kopt), rho, xbase + xpt(:, kopt), cstrv, constr)
-        ! DNORMSAV is corresponding to the latest function evaluations with the current RHO.
+        ! DNORM_REC is corresponding to the latest function evaluations with the current RHO.
         ! Update it after reducing RHO.
-        dnormsav = REALMAX
+        dnorm_rec = REALMAX
     end if  ! End of IF (REDUCE_RHO). The procedure of reducing RHO ends.
 
     ! Shift XBASE if XOPT may be too far from XBASE.
@@ -608,15 +635,16 @@ do tr = 1, maxtr
     end if
 end do  ! End of DO TR = 1, MAXTR. The iterative procedure ends.
 
-! Return from the calculation, after trying the Newton-Raphson step if it has not been tried before.
+! Return from the calculation, after trying the Newton-Raphson step if it has not been tried yet.
 if (info == SMALL_TR_RADIUS .and. shortd .and. nf < maxfun) then
     x = xbase + (xpt(:, kopt) + d)
     call evaluate(calfun, x, f)
     nf = nf + 1_IK
-    constr = matprod(x, A_orig) - b_orig
+    constr_leq = matprod(Aeq, x) - beq
+    constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
     cstrv = maximum([ZERO, constr])
     ! Print a message about the function evaluation according to IPRINT.
-    ! Zaikun 20230512: DELTA has been updated. RHO only indicative here. TO BE IMPROVED.
+    ! Zaikun 20230512: DELTA has been updated. RHO is only indicative here. TO BE IMPROVED.
     call fmsg(solver, 'Trust region', iprint, nf, rho, f, x, cstrv, constr)
     ! Save X, F, CSTRV into the history.
     call savehist(nf, x, xhist, f, fhist, cstrv, chist)
@@ -628,8 +656,12 @@ end if
 kopt = selectx(ffilt(1:nfilt), cfilt(1:nfilt), cweight, ctol)
 x = xfilt(:, kopt)
 f = ffilt(kopt)
-constr = matprod(x, A_orig) - b_orig
+constr_leq = matprod(Aeq, x) - beq
+constr = [xl(ixl) - x(ixl), x(ixu) - xu(ixu), -constr_leq, constr_leq, matprod(Aineq, x) - bineq]
 cstrv = maximum([ZERO, constr])
+
+! Deallocate IXL and IXU as they have finished their job.
+deallocate (ixl, ixu)
 
 ! Arrange CHIST, FHIST, and XHIST so that they are in the chronological order.
 call rangehist(nf, xhist, fhist, chist)

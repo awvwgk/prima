@@ -21,7 +21,7 @@ module powalg_mod
 !
 ! Started: July 2020
 !
-! Last Modified: Wednesday, April 12, 2023 PM11:41:00
+! Last Modified: Monday, August 07, 2023 AM03:52:58
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -365,12 +365,10 @@ end if
 ! K+1 of Q (as well as rows K and K+1 of R). This makes sure that the entires of the update RDIAG
 ! are all positive if it is the case for the original RDIAG.
 do k = i, n - 1_IK
-    !hypt = hypotenuse(Rdiag(k + 1), inprod(Q(:, k), A(:, k + 1)))
-    !hypt = sqrt(Rdiag(k + 1)**2 + inprod(Q(:, k), A(:, k + 1))**2)
     G = planerot([Rdiag(k + 1), inprod(Q(:, k), A(:, k + 1))])
     Q(:, [k, k + 1_IK]) = matprod(Q(:, [k + 1_IK, k]), transpose(G))
-
-    ! Powell's code updates RDIAG in the following way.
+    ! Powell's code updates RDIAG in the following way:
+    ! !HYPT = SQRT(RDIAG(K + 1)**2 + INPROD(Q(:, K), A(:, K + 1))**2)
     ! !RDIAG([K, K + 1_IK]) = [HYPT, (RDIAG(K + 1) / HYPT) * RDIAG(K)]
     ! Note that RDIAG(N) inherits all rounding in RDIAG(I:N-1) and Q(:, I:N-1) and hence contain
     ! significant errors. Thus we may modify Powell's code to set only RDIAG(K) = HYPT here and then
@@ -1102,10 +1100,6 @@ subroutine updateh(knew, kref, d, xpt, idz, bmat, zmat, info)
 ! Theoretically (but not numerically), they should return the same VLAG and BETA as the calls below.
 ! However, as observed on 20220412, such an implementation can lead to significant errors in H!
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: GROT(2, 2), V1(N), V2(N), VLAG(NPT+N), HCOL(NPT+N)
-! Size of local arrays: REAL(RP)*(4+4*N+2*NPT)
-!--------------------------------------------------------------------------------------------------!
 
 ! Common modules
 use, non_intrinsic :: consts_mod, only : RP, IK, ONE, ZERO, DEBUGGING
@@ -1491,10 +1485,6 @@ function calvlag_lfqint(kref, bmat, d, xpt, zmat, idz) result(vlag)
 ! subroutine is usually invoked with KREF = KOPT, which correspond to the current best interpolation
 ! point as well as the center of the trust region. See (4.25) of the NEWUOA paper.
 !--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: VLAG(NPT+N), WCHECK(NPT), XREF(N)
-! Size of local arrays: REAL(RP)*(2*NPT+2*N)
-!--------------------------------------------------------------------------------------------------!
 
 ! Common modules
 use, non_intrinsic :: consts_mod, only : RP, IK, ONE, HALF, EPS, DEBUGGING
@@ -1586,10 +1576,6 @@ function calbeta(kref, bmat, d, xpt, zmat, idz) result(beta)
 ! This function calculates BETA for a given step D with respect to XREF = XPT(:, KREF). This
 ! subroutine is usually invoked with KREF = KOPT, which correspond to the current best interpolation
 ! point as well as the center of the trust region. See (4.12) and (4.26) of the NEWUOA paper.
-!--------------------------------------------------------------------------------------------------!
-! List of local arrays (including function-output arrays; likely to be stored on the stack):
-! REAL(RP) :: BW(N), BD(N), WCHECK(NPT), XREF(N)
-! Size of local arrays: REAL(RP)*(3*NPT+4*N)
 !--------------------------------------------------------------------------------------------------!
 
 ! Common modules

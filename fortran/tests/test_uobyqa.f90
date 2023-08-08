@@ -6,7 +6,7 @@ module test_solver_mod
 !
 ! Started: September 2021
 !
-! Last Modified: Tuesday, May 09, 2023 AM09:50:18
+! Last Modified: Tuesday, June 27, 2023 AM07:44:03
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -17,16 +17,16 @@ public :: test_solver
 contains
 
 
-subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed)
+subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed, testdim)
 
 use, non_intrinsic :: consts_mod, only : RP, IK, TWO, TEN, ZERO, REALMAX
 use, non_intrinsic :: memory_mod, only : safealloc
-use, non_intrinsic :: uobyqa_mod, only : uobyqa
 use, non_intrinsic :: noise_mod, only : noisy, noisy_calfun, orig_calfun
 use, non_intrinsic :: param_mod, only : MINDIM_DFT, MAXDIM_DFT, DIMSTRIDE_DFT, NRAND_DFT, RANDSEED_DFT
 use, non_intrinsic :: prob_mod, only : PNLEN, PROB_T, construct, destruct
 use, non_intrinsic :: rand_mod, only : setseed, rand, randn
 use, non_intrinsic :: string_mod, only : strip, istr
+use, non_intrinsic :: uobyqa_mod, only : uobyqa
 
 implicit none
 
@@ -36,14 +36,15 @@ integer(IK), intent(in), optional :: maxdim
 integer(IK), intent(in), optional :: dimstride
 integer(IK), intent(in), optional :: nrand
 integer, intent(in), optional :: randseed
+character(len=*), intent(in), optional :: testdim
 
 character(len=*), parameter :: bigprob = 'bigprob'
 character(len=*), parameter :: solname = 'uobyqa'
+character(len=:), allocatable :: testdim_loc
 character(len=PNLEN) :: probname
 character(len=PNLEN) :: probs_loc(100)
 integer :: randseed_loc
 integer :: rseed
-integer(IK), parameter :: bign = 120_IK
 integer(IK) :: dimstride_loc
 integer(IK) :: iprint
 integer(IK) :: iprob
@@ -56,11 +57,12 @@ integer(IK) :: n
 integer(IK) :: nprobs
 integer(IK) :: npt
 integer(IK) :: nrand_loc
+integer(IK), parameter :: bign = 80_IK
+integer(IK), parameter :: largen = 160_IK
 real(RP) :: f
 real(RP) :: ftarget
 real(RP) :: rhobeg
 real(RP) :: rhoend
-logical :: test_bigprob = .false.
 real(RP), allocatable :: fhist(:)
 real(RP), allocatable :: x(:)
 real(RP), allocatable :: xhist(:, :)
@@ -104,26 +106,32 @@ else
     randseed_loc = RANDSEED_DFT
 end if
 
+if (present(testdim)) then
+    testdim_loc = testdim
+else
+    testdim_loc = 'small'
+end if
+
 
 ! Test the big problem
-if (test_bigprob) then
+if (testdim_loc == 'big' .or. testdim_loc == 'large') then
     probname = bigprob
-    n = bign
+    n = merge(bign, largen, testdim_loc == 'big')
     call construct(prob, probname, n)
     do irand = 1, 1  ! The test is expensive
         rseed = int(sum(istr(solname)) + sum(istr(probname)) + n + irand + RP + randseed_loc)
         call setseed(rseed)
-        iprint = 3
+        iprint = 2_IK
         npt = (n + 2_IK) * (n + 1_IK) / 2_IK
-        if (int(npt) + 800 > huge(0_IK)) then
+        if (int(npt) + 2000 > huge(0_IK)) then
             maxfun = huge(0_IK)
         else
-            maxfun = npt + int(800.0_RP * rand(), IK)
+            maxfun = npt + int(2000.0_RP * rand(), IK)
         end if
         maxhist = maxfun
         ftarget = -REALMAX
         rhobeg = noisy(prob % Delta0)
-        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(4.0_RP * rand() - 3.5_RP))
+        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(6.0_RP * rand() - 6.0_RP))
         call safealloc(x, n) ! Not all compilers support automatic allocation yet, e.g., Absoft.
         x = noisy(prob % x0)
         orig_calfun => prob % calfun

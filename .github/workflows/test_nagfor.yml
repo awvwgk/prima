@@ -15,6 +15,7 @@ jobs:
   test:
     name: Run nagfor tests
     runs-on: [self-hosted, nagfor]
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -24,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
           submodules: recursive
@@ -37,15 +38,12 @@ jobs:
           export PATH=$PATH:"~/local/bin"
           source ~/local/bin/nag_licensing || echo "\n\nNAG licensing failed.\n\n"
           # Use $(( )) rather than $(expr ). See https://unix.stackexchange.com/questions/63166/bash-e-exits-when-let-or-expr-evaluates-to-0
-          FFLAGS=-O$(($(date +%d) % 5))
+          FFLAGS=-O$(($(date +%-d) % 5))
           FFLAGS=${FFLAGS/O0/g}
           FFLAGS=${FFLAGS/O4/fast}
           export FFLAGS
-          cd "$ROOT_DIR"/fortran/tests
-          if [[ -f test_cobyla.f90 ]]; then
-              $SEDI 's|bign = 120|bign = 100|g' test_cobyla.f90
-          fi
-          export TESTDIM=${{ matrix.testdim }} && make ntest_${{ matrix.ikind }}.${{ matrix.solver }}
+          export TESTDIM=${{ matrix.testdim }}
+          cd "$ROOT_DIR"/fortran/tests && make ntest_${{ matrix.ikind }}.${{ matrix.solver }}
           cd "$ROOT_DIR"/fortran/examples/${{ matrix.solver }} && make ntest
 
       - name: Store artifacts
@@ -56,3 +54,20 @@ jobs:
 
       - name: Remove the test data
         run: rm -rf ${{ env.TEST_DIR }}
+
+  # The following job check whether the tests were successful or cancelled due to timeout.
+  # N.B.: Remember to specify `continue-on-error: true` for the job of the tests.
+  check_success_timeout:
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    needs: test
+    steps:
+      - name: Clone the GitHub actions scripts
+        uses: actions/checkout@v3.5.3
+        with:
+          repository: equipez/github_actions_scripts
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
+          path: scripts
+
+      - name: Check whether the tests were successful or cancelled due to timeout
+        run: bash scripts/check_success_timeout_big_test ${{ secrets.GITHUB_TOKEN }} ${{ github.repository }} ${{ github.run_id }}

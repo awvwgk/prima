@@ -12,7 +12,7 @@ if [[ -z "$FINTRFH" ]] ; then
 fi
 
 # Parse inputs.
-if ! [[ $# -eq 0 || $# -eq 1 ]] ; then
+if [[ $# -gt 2 ]] ; then
     printf "Usage: mlint [--compiler_name [-all]] or mlint -c|--clean\n"
     exit 2
 fi
@@ -27,9 +27,16 @@ COMPILER_LIST=(sunf95 gfortran nagfor g95 ifort nvfortran flang aflang ifx)
 CLIST=(s g n 9 i v f d x)
 COMP_LIST=""
 for i in "${!COMPILER_LIST[@]}"; do
-   if  type "${COMPILER_LIST[$i]}" &> /dev/null ; then
-       COMP_LIST="$COMP_LIST ${CLIST[$i]}"
-   fi
+    if type "${COMPILER_LIST[$i]}" &> /dev/null ; then
+        if [[ "${COMPILER_LIST[$i]}" == "flang" ]] ; then
+            # Do not make ftest if flang is provided by ARM or AMD; rtest and dtest should be made instead.
+            if ! type "${COMPILER_LIST[$i]}" | grep -q '\/opt\/arm\|\/opt\/AMD' ; then
+                COMP_LIST="$COMP_LIST ${CLIST[$i]}"
+            fi
+        else
+            COMP_LIST="$COMP_LIST ${CLIST[$i]}"
+        fi
+    fi
 done
 
 # Parse the arguments
@@ -76,10 +83,6 @@ while [[ -n "$1" ]]; do
     shift
 done
 
-# The default Fortran compiler options.
-FFLAGS=''
-# We export FFLAGS, which will be referred to by the Makefiles.
-export FFLAGS
 
 # The directory where this script resides. It is the solver's directory.
 SOLVER_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -135,9 +138,20 @@ fi
 
 printf "Tests to make:%s\n\n" "$COMP_LIST"
 
+if [[ $TEST_ALL == 'Y' ]] ; then
+    FLG_LIST="-g -O2 -O3 -fast"
+else
+    FLG_LIST="-g -O2 -fast"
+fi
+
+printf "Flags to test: %s\n\n" "$FLG_LIST"
+
 for COMP in $COMP_LIST; do
     if [[ $TEST_ALL == 'Y' && $ARM32 != 'Y' ]] ; then
-        make  "$COMP"test."$SOLVER"
+        for FLG in $FLG_LIST ; do
+            printf "%s\t" "$FLG"
+            export FFLAGS=$FLG && make "$COMP"test."$SOLVER"
+        done
     else
        if [[ $COMP == 'f' || $COMP == 'v' || $COMP == 'd' || $COMP == 'x' || $ARM32 == 'Y' ]] ; then
             TESTS="i2_r4_d1 i8_r4_d0"
@@ -145,26 +159,30 @@ for COMP in $COMP_LIST; do
             TESTS="i2_r16_d1 i8_r4_d0"
         fi
         for TEST in $TESTS ; do
-            INFO="$(make "$COMP"test_"$TEST"_tst."$SOLVER" 2>&1 \
-                | grep -v "binary\ file\ matches" \
-                | grep -i "starts\|warning\|error\|info\|abort\|invalid\|violation\|fault\|illegal\|fail\|questionable\|remark\|attention\|Could\ not\ resolve" \
-                | grep -vi "[0-9]\s*warning\|[0-9]\s*error\|[0-9]\s*info\|infos.f90\|information\|xhist, info)\|--warning\|--error" \
-                | grep -vi "pedantic-errors\|Werror\|warn\ errors\|diag-error-limit\|colour=error\|rounding\ error\|constraint\ violation" \
-                | grep -vi "INFO_DFT\|==\s*info\|errorid\|errormsg" \
-                | grep -vi "\[xopt, fopt, info, nf, xhist, fhist\] = FUNCTION_NAME" \
-                | grep -v "^- \|^| \|^\* \|^+ \|^X \|\# " \
-                )"
-            echo "$INFO" | grep -i --color "starts\|warning\|error\|info\|abort\|invalid\|violation\|fault\|illegal\|fail\|questionable\|remark\|attention\|Could\ not\ resolve"
-            if echo "$INFO" | grep -iq "error\|abort\|invalid\|violation\|fault\|illegal\|fail\|Could\ not\ resolve" ; then
-                if [[ -f "$TEST_LOG_DIR"/"$COMP"test_"$TEST"_tst.log ]] ; then
-                    LOGFILE="$COMP"test_"$TEST"_tst.log
-                else
-                    LOGFILE="$COMP"test.log
+            for FLG in $FLG_LIST ; do
+                printf "%s\t" "$FLG"
+                export FFLAGS=$FLG
+                INFO="$(make "$COMP"test_"$TEST"_tst."$SOLVER" 2>&1 \
+                    | grep -v "binary\ file\ matches" \
+                    | grep -i "starts\|warning\|error\|info\|abort\|invalid\|violation\|fault\|illegal\|fail\|questionable\|remark\|attention\|Could\ not\ resolve" \
+                    | grep -vi "[0-9]\s*warning\|[0-9]\s*error\|[0-9]\s*info\|infos.f90\|information\|xhist, info)\|zmat, info)\|--warning\|--error" \
+                    | grep -vi "pedantic-errors\|Werror\|warn\ errors\|diag-error-limit\|colour=error\|rounding\ error\|constraint\ violation" \
+                    | grep -vi "INFO_DFT\|==\s*info\|errorid\|errormsg" \
+                    | grep -vi "\[xopt, fopt, info, nf, xhist, fhist\] = FUNCTION_NAME" \
+                    | grep -v "^- \|^| \|^\* \|^+ \|^X \|\# " \
+                    )"
+                echo "$INFO" | grep -i --color "starts\|warning\|error\|info\|abort\|invalid\|violation\|fault\|illegal\|fail\|questionable\|remark\|attention\|Could\ not\ resolve"
+                if echo "$INFO" | grep -iq "error\|abort\|invalid\|violation\|fault\|illegal\|fail\|Could\ not\ resolve" ; then
+                    if [[ -f "$TEST_LOG_DIR"/"$COMP"test_"$TEST"_tst.log ]] ; then
+                        LOGFILE="$COMP"test_"$TEST"_tst.log
+                    else
+                        LOGFILE="$COMP"test.log
+                    fi
+                    mv "$TEST_LOG_DIR"/"$LOGFILE" "$SOLVER_LOG_DIR"
+                    cat "$SOLVER_LOG_DIR"/"$LOGFILE"
+                    exit 2
                 fi
-                mv "$TEST_LOG_DIR"/"$LOGFILE" "$SOLVER_LOG_DIR"
-                cat "$SOLVER_LOG_DIR"/"$LOGFILE"
-                exit 2
-            fi
+            done
         done
     fi
     mv "$TEST_LOG_DIR"/"$COMP"test*.log "$SOLVER_LOG_DIR" 2>/dev/null || true

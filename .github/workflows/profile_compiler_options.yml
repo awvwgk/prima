@@ -3,7 +3,7 @@ name: Plot performance profiles, various compiler options
 on:
   # Trigger the workflow on push or pull request
   #push:
-  #pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
+  pull_request:  # DANGEROUS! MUST be disabled for self-hosted runners!
   # Trigger the workflow by cron. The default time zone of GitHub Actions is UTC.
   schedule:
     - cron: '0 4 * * *'
@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest]
         matlab: [latest]
         dim: [all]
-        solver: [cobylal, cobylan, uobyqa, newuoa, bobyqa, lincoa, prima]
+        solver: [cobylal, cobylan, uobyqa, newuoa, bobyqa, lincoa]  # prima is too expensive
         compiler_options: [-O0, -O1, -O2, -O3, -Ofast -fno-stack-arrays, -ffast-math]
         competitor: [classical]
         with_optim_toolbox: [yes, no]
@@ -42,13 +42,13 @@ jobs:
         run:  echo "SOLNAME=$(echo ${{ matrix.solver }} | cut -c1-6)" >> $GITHUB_ENV
 
       - name: Check out repository
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
           submodules: recursive
 
       - name: Clone MatCUTEst
-        uses: actions/checkout@v3.5.2
+        uses: actions/checkout@v3.5.3
         with:
           ssh-key: ${{ secrets.SSH_PRIVATE_KEY_ACT }} # This forces checkout to use SSH, not HTTPS
           repository: equipez/matcutest_compiled
@@ -66,8 +66,7 @@ jobs:
         id: check_matlab
         run: if type 'matlab' &> /dev/null ; then echo "::set-output name=has_matlab::true" ; fi
 
-      - name: Cache MATLAB
-        id: cache-matlab
+      - name: Cache MATLAB  # N.B.: Clear the cache when the `latest` version of MATLAB changes in March and September  
         uses: actions/cache@v3.3.1
         with:
           path: ${{ runner.tool_cache }}/MATLAB
@@ -92,7 +91,7 @@ jobs:
           sed -i "s|return|for ifile = 1 : length(config_files), ifile, cfile = fullfile(config_dir, config_files{ifile}) , system(['cat ', cfile]); end|" set_compiler_options.m
 
       - name: Conduct the test
-        uses: matlab-actions/run-command@v1.2.0
+        uses: matlab-actions/run-command@v1.2.1
         with:
           command: |
             ver;

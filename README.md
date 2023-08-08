@@ -14,12 +14,13 @@
 - [Who was Powell?](#who-was-powell)
 - [A "fun" fact](#a-fun-fact)
 - [Acknowledgment](#acknowledgment)
-- [References](#references)
+- [Citing PRIMA](#citing-prima)
+- [Charityware](#charityware)
+- [Contact](#contact)
 - [Mirrors](#mirrors)
     - [Gitee](https://gitee.com/libprima/prima)
     - [GitHub](https://github.com/libprima/prima)
     - [GitLab](https://gitlab.com/libprima/prima)
-- [Contact](#contact)
 - [Star history](#star-history)
 
 
@@ -40,6 +41,8 @@ and [repository](https://github.com/pdfo/pdfo) of [PDFO](https://www.pdfo.net) i
 
 PRIMA was initiated by [Zaikun Zhang](https://www.zhangzk.net) in July 2020, based on
 the [PDFO](https://www.pdfo.net) package by [Tom M. Ragonneau](https://tomragonneau.com/) and Zaikun Zhang.
+
+See [Zaikun Zhang's talk](https://raw.githubusercontent.com/ztalks/20230603-siopt23/main/202306-siopt23.pdf) on PRIMA at [SIAM Conference on Optimization 2023](https://www.siam.org/conferences/cm/conference/op23) for more information.
 
 
 ### Why
@@ -74,7 +77,7 @@ mathematically equivalent to Powell’s, except for the
 [bug fixes](#bug-fixes) and [improvements](#improvements) made intentionally.
 
 The focus is to implement these methods in a **structured** and **modularized** way so that they
-are **understandable**, **maintainable**, **extendable**, **fault tolerant**, and **future proof**.
+are **understandable**, **maintainable**, **extendable**, **fault-tolerant**, and **future-proof**.
 The code will **have no GOTO** (of course)
 and will **use matrix-vector procedures instead of loops** whenever possible.
 In doing so, PRIMA codes the algorithms **in a way that we would present them on a blackboard**.
@@ -103,16 +106,21 @@ to reorganize (indeed, to **rewrite**) the code. To maintain the faithfulness an
 reference implementation, extensive tests are conducted after each and every tiny modification,
 using the [CUTEst](https://github.com/ralna/CUTEst) problems via [MatCUTEst](https://github.com/equipez/matcutest).
 The tests do not only verify the faithfulness of the implementation but also check that **the solvers
-behave properly even if they are invoked with improper inputs or encounter failures of function evaluations**.
+behave properly even if they are invoked with improper inputs or [encounter failures of function
+evaluations](https://github.com/libprima/prima/blob/main/matlab/tests/private/tough.m)**.
+[**Stress tests**](#stress-tests) are also conducted
+periodically to verify that the solvers work correctly without running into errors when applied to
+**excessively large problems**.
 
-The tests are automated by
-[GitHub Actions](https://docs.github.com/en/actions). As of May 2023, more than
-40,000 "workflows" have been successfully run by GitHub Actions. Normally, each workflow consists of \~ 5
-([sometimes more than 150](https://github.com/primalib/prima/actions/runs/4345972852))
+The tests are **automated** by
+[GitHub Actions](https://docs.github.com/en/actions). As of August 2023, more than
+45,000 "workflows" have been successfully run by GitHub Actions. Normally, each workflow consists of \~ 5
+([sometimes more than 200](https://github.com/primalib/prima/actions/runs/5763631681))
 **randomized** tests,
 each test taking from tens of minutes to several hours (the maximum
 is 6 hours, after which the test will be canceled automatically). In other words,
 PRIMA has been verified by more than 200,000 hours (or **more than 20 years**) of randomized tests.
+**Code must be battle-tested before becoming software.**
 
 Since each GitHub Team account can only run at most 60 GitHub Actions workflows concurrently, I have
 to distribute this large amount of tests to several different Team accounts as follows.
@@ -122,8 +130,9 @@ to distribute this large amount of tests to several different Team accounts as f
     - [![Check Spelling](https://github.com/libprima/prima/actions/workflows/spelling.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/spelling.yml)
     - [![Test Absoft](https://github.com/libprima/prima/actions/workflows/test_absoft.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/test_absoft.yml)
     - [![Test nagfor](https://github.com/libprima/prima/actions/workflows/test_nagfor.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/test_nagfor.yml)
-    - [![Lint](https://github.com/libprima/prima/actions/workflows/lint.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/lint.yml)
     - [![Plot performance profiles for PRIMA, small](https://github.com/libprima/prima/actions/workflows/profile_prima_small.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/profile_prima_small.yml)
+    - [![Lint the Fortran code and the MEX gateways with nagfor](https://github.com/libprima/prima/actions/workflows/lint_nagfor.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/lint_nagfor.yml)
+    - [![Lint the Fortran code and the MEX gateways on GitHub hosted runners](https://github.com/libprima/prima/actions/workflows/lint_hosted.yml/badge.svg)](https://github.com/libprima/prima/actions/workflows/lint_hosted.yml)
 
 - [Tests](https://github.com/libsprima/prima/actions) at [libsprima/prima](https://github.com/libsprima/prima)
     - [![Verification, small](https://github.com/libsprima/prima/actions/workflows/verify_small.yml/badge.svg)](https://github.com/libsprima/prima/actions/workflows/verify_small.yml)
@@ -146,6 +155,11 @@ to distribute this large amount of tests to several different Team accounts as f
     - [![Plot performance profiles, single](https://github.com/primalib/prima/actions/workflows/profile_single.yml/badge.svg)](https://github.com/primalib/prima/actions/workflows/profile_single.yml)
     - [![Plot performance profiles, quadruple](https://github.com/primalib/prima/actions/workflows/profile_quadruple.yml/badge.svg)](https://github.com/primalib/prima/actions/workflows/profile_quadruple.yml)
     - [![Plot performance profiles, various compiler options](https://github.com/primalib/prima/actions/workflows/profile_compiler_options.yml/badge.svg)](https://github.com/primalib/prima/actions/workflows/profile_compiler_options.yml)
+
+- [Tests](https://github.com/sprimalib/prima/actions) at [sprimalib/prima](https://github.com/sprimalib/prima)<a name="stress-tests"></a>
+
+    - [![Stress test on large problems, Fortran](https://github.com/sprimalib/prima/actions/workflows/stress_test_fortran.yml/badge.svg)](https://github.com/sprimalib/prima/actions/workflows/stress_test_fortran.yml)
+    - [![Stress test on large problems, MATLAB](https://github.com/sprimalib/prima/actions/workflows/stress_test_matlab.yml/badge.svg)](https://github.com/sprimalib/prima/actions/workflows/stress_test_matlab.yml)
 
 - [Tests](https://github.com/zequipe/prima/actions) at [zequipe/prima](https://github.com/zequipe/prima)
     - [![Test Flang](https://github.com/zequipe/prima/actions/workflows/test_flang.yml/badge.svg)](https://github.com/zequipe/prima/actions/workflows/test_flang.yml)
@@ -288,19 +302,19 @@ for more information.
 
 
 - NEWUOA on unconstrained CUTEst problems of at most 200 variables
-<img src="./benchmark/latest/newuoa.png" style="width:26em;"/>
+<img src="./benchmark/latest/prima_newuoa.png" style="width:26em;"/>
 
 - BOBYQA on bound-constrained CUTEst problems of at most 200 variables
-<img src="./benchmark/latest/bobyqa.png" style="width:26em;"/>
+<img src="./benchmark/latest/prima_bobyqa.png" style="width:26em;"/>
 
 - LINCOA on linearly constrained CUTEst problems of at most 200 variables and 20000 constraints
-<img src="./benchmark/latest/lincoa.png" style="width:26em;"/>
+<img src="./benchmark/latest/prima_lincoa.png" style="width:26em;"/>
 
 - COBYLA on nonlinearly constrained CUTEst problems of at most 100 variables and 10000 constraints
-<img src="./benchmark/latest/cobyla.png" style="width:26em;"/>
+<img src="./benchmark/latest/prima_cobyla.png" style="width:26em;"/>
 
 - UOBYQA on unconstrained CUTEst problems of at most 100 variables
-<img src="./benchmark/latest/uobyqa.png" style="width:26em;"/>
+<img src="./benchmark/latest/prima_uobyqa.png" style="width:26em;"/>
 
 
 ### Who was Powell?
@@ -331,7 +345,7 @@ the coding has been.
 The bitterness behind this "fun" fact is exactly why I work on PRIMA: I hope that all
 the frustrations that I have experienced will not happen to any user of Powell's methods anymore.
 I hope I am the last one in the world to decode a maze of 244 GOTOs in 7939 lines of Fortran 77 code &mdash;
-I have been doing this for three years and I do not want anyone else to do it again.
+I did this for three years and I do not want anyone else to do it again.
 
 
 ### Acknowledgment
@@ -348,30 +362,46 @@ the [Hong Kong Ph.D. Fellowship Scheme](https://cerg1.ugc.edu.hk/hkpfs/index.htm
 
 PRIMA is a long-term project, which would not have been sustainable without the continued funds from the
 [Hong Kong Research Grants Council](https://www.ugc.edu.hk/eng/rgc/) (ref. PolyU 253012/17P, PolyU 153054/20P,
-and PolyU 153066/21P) and [The Hong Kong Polytechnic University](https://www.polyu.edu.hk/) (PolyU),
+PolyU 153066/21P, and PolyU 153086/23P) and [The Hong Kong Polytechnic University](https://www.polyu.edu.hk/) (PolyU),
 in particular the [Department of Applied Mathematics](https://www.polyu.edu.hk/ama) (AMA).
 
 
-### References
+### Citing PRIMA
 
-[1] M. J. D. Powell, A direct search optimization method that models the
+If you use PRIMA, please cite it as follows. Note that PRIMA contains [bug fixes](#bug-fixes)
+and [improvements](#improvements) that do not exist in Powell's original implementation of the solvers.
+
+[1] Z. Zhang, PRIMA: Reference Implementation for Powell's Methods with Modernization and Amelioration, available at http://www.libprima.net, [DOI: 10.5281/zenodo.8052654](https://doi.org/10.5281/zenodo.8052654), 2023
+
+```bibtex
+@misc{Zhang_2023,
+    title        = {PRIMA: Reference Implementation for Powell's Methods with Modernization and Amelioration},
+    author       = {Zhang, Z.},
+    howpublished = {available at http://www.libprima.net, DOI: 10.5281/zenodo.8052654},
+    year         = {2023}
+}
+```
+
+In addition, Powell’s methods can be cited as follows.
+
+[2] M. J. D. Powell, A direct search optimization method that models the
 objective and constraint functions by linear interpolation, In Advances
 in *Optimization and Numerical Analysis*, *eds.* S. Gomez and J. P. Hennart,
 pages 51--67, Springer Verlag, Dordrecht, Netherlands, 1994
 
-[2] M. J. D. Powell, UOBYQA: unconstrained optimization by quadratic
+[3] M. J. D. Powell, UOBYQA: unconstrained optimization by quadratic
 approximation, *Math. Program.*, 92(B):555--582, 2002
 
-[3] M. J. D. Powell, The NEWUOA software for unconstrained optimization
+[4] M. J. D. Powell, The NEWUOA software for unconstrained optimization
 without derivatives, In *Large-Scale Nonlinear Optimization*, *eds.* G. Di Pillo
 and M. Roma, pages 255--297, Springer, New York, US, 2006
 
-[4] M. J. D. Powell, The BOBYQA algorithm for bound constrained
+[5] M. J. D. Powell, The BOBYQA algorithm for bound constrained
 optimization without derivatives, Technical Report DAMTP 2009/NA06,
 Department of Applied Mathematics and Theoretical Physics, Cambridge
 University, Cambridge, UK, 2009
 
-[5] T. M. Ragonneau and Z. Zhang,
+[6] T. M. Ragonneau and Z. Zhang,
 [PDFO: a cross-platform package for Powell's derivative-free optimization solvers](https://arxiv.org/pdf/2302.13246.pdf),
 arXiv:2302.13246, 2023
 
@@ -382,8 +412,25 @@ arXiv:2302.13246, 2023
 linear inequality constraints without using derivatives of the objective
 function. Powell did not publish a paper to introduce the algorithm.
 
-- [The paper [5]](https://arxiv.org/pdf/2302.13246.pdf) introduces [the PDFO package](https://www.pdfo.net)
+- [The paper [6]](https://arxiv.org/pdf/2302.13246.pdf) introduces [the PDFO package](https://www.pdfo.net)
 rather than PRIMA. Nevertheless, it provides a good introduction to Powell's methods.
+
+
+### Charityware
+
+PRIMA is [charityware](https://en.wikipedia.org/wiki/Careware), distributed for free under its 
+[license](https://github.com/libprima/prima/blob/main/LICENCE.txt). 
+If you appreciate it, you may consider making a donation to a charity that you trust
+(in addition to [citing \& acknowledging PRIMA](https://github.com/libprima/prima#citing-prima)).
+This is only a suggestion, not an obligation. 
+
+The inspiration comes from [Vim](https://www.vim.org/), with which Zaikun Zhang typed all his PRIMA code. 
+
+
+### Contact
+
+In case of problems, [open a GitHub issue](https://github.com/libprima/prima/issues) or [contact
+Zaikun Zhang](https://www.zhangzk.net).
 
 
 ### Mirrors
@@ -393,12 +440,6 @@ rather than PRIMA. Nevertheless, it provides a good introduction to Powell's met
 - GitHub: [https://github.com/libprima/prima](https://github.com/libprima/prima)
 
 - GitLab: [https://gitlab.com/libprima/prima](https://gitlab.com/libprima/prima)
-
-
-### Contact
-
-In case of problems, [open a GitHub issue](https://github.com/libprima/prima/issues) or [contact
-Zaikun Zhang](https://www.zhangzk.net).
 
 
 ### <a href="https://star-history.com/#libprima/prima&Date">Star history</a>

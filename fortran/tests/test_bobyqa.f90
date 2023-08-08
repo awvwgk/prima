@@ -6,7 +6,7 @@ module test_solver_mod
 !
 ! Started: September 2021
 !
-! Last Modified: Tuesday, May 09, 2023 AM09:49:43
+! Last Modified: Tuesday, July 04, 2023 AM01:02:33
 !--------------------------------------------------------------------------------------------------!
 
 implicit none
@@ -17,7 +17,7 @@ public :: test_solver
 contains
 
 
-subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed)
+subroutine test_solver(probs, mindim, maxdim, dimstride, nrand, randseed, testdim)
 
 use, non_intrinsic :: bobyqa_mod, only : bobyqa
 use, non_intrinsic :: consts_mod, only : RP, IK, TWO, TEN, ZERO, REALMAX
@@ -33,20 +33,21 @@ use, non_intrinsic :: string_mod, only : strip, istr
 implicit none
 
 character(len=PNLEN), intent(in), optional :: probs(:)
-integer(IK), intent(in), optional :: dimstride
-integer(IK), intent(in), optional :: maxdim
 integer(IK), intent(in), optional :: mindim
+integer(IK), intent(in), optional :: maxdim
+integer(IK), intent(in), optional :: dimstride
 integer(IK), intent(in), optional :: nrand
 integer, intent(in), optional :: randseed
+character(len=*), intent(in), optional :: testdim
 
 character(len=*), parameter :: bigprob = 'bigprob'
 character(len=*), parameter :: solname = 'bobyqa'
 character(len=*), parameter :: srname = 'TEST_BOBYQA'
+character(len=:), allocatable :: testdim_loc
 character(len=PNLEN) :: probname
 character(len=PNLEN) :: probs_loc(100)  ! Maximal number of problems to test: 100
 integer :: randseed_loc
 integer :: rseed
-integer(IK), parameter :: bign = 400_IK
 integer(IK) :: dim_list(100)  ! Maximal number of dimensions to test: 100
 integer(IK) :: dimstride_loc
 integer(IK) :: idim
@@ -59,12 +60,13 @@ integer(IK) :: maxhist
 integer(IK) :: mindim_loc
 integer(IK) :: n
 integer(IK) :: ndim
+integer(IK) :: nnpt
 integer(IK) :: nprobs
 integer(IK) :: npt
-integer(IK) :: nnpt
 integer(IK) :: npt_list(10)
 integer(IK) :: nrand_loc
-logical :: test_bigprob = .false.
+integer(IK), parameter :: bign = 300_IK
+integer(IK), parameter :: largen = 1600_IK
 real(RP) :: f
 real(RP) :: f_unc
 real(RP) :: ftarget
@@ -115,33 +117,39 @@ else
     randseed_loc = RANDSEED_DFT
 end if
 
+if (present(testdim)) then
+    testdim_loc = testdim
+else
+    testdim_loc = 'small'
+end if
+
 
 ! Test the big problem
-if (test_bigprob) then
+if (testdim_loc == 'big' .or. testdim_loc == 'large') then
     probname = bigprob
-    n = bign
+    n = merge(bign, largen, testdim_loc == 'big')
     call construct(prob, probname, n)
     do irand = 1, 1  ! The test is expensive
         rseed = int(sum(istr(solname)) + sum(istr(probname)) + n + irand + RP + randseed_loc)
         call setseed(rseed)
         npt = max(n + 2_IK, int(5.0 * rand() * real(n, RP), kind(npt)))
-        iprint = 3
-        if (int(npt) + 800 > huge(0_IK)) then
+        iprint = 2_IK
+        if (int(npt) + 2000 > huge(0_IK)) then
             maxfun = huge(0_IK)
         else
-            maxfun = npt + int(800.0_RP * rand(), IK)
+            maxfun = npt + int(2000.0_RP * rand(), IK)
         end if
         maxhist = maxfun
         ftarget = -REALMAX
         rhobeg = noisy(prob % Delta0)
-        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(4.0_RP * rand() - 3.5_RP))
+        rhoend = max(1.0E-6_RP, rhobeg * 1.0E1_RP**(6.0_RP * rand() - 6.0_RP))
         call safealloc(x, n) ! Not all compilers support automatic allocation yet, e.g., Absoft.
         x = noisy(prob % x0)
         orig_calfun => prob % calfun
 
         print '(/A, I0, A, I0, A, I0, A, I0)', &
             & strip(probname)//': N = ', n, ' NPT = ', npt, ', MAXFUN = ', maxfun, ', Random test ', irand
-        call bobyqa(noisy_calfun, x, f, xl=prob % lb, xu=prob % ub, &
+        call bobyqa(noisy_calfun, x, f, xl=prob % xl, xu=prob % xu, &
             & npt=npt, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxhist=maxhist, fhist=fhist, xhist=xhist, &
             & ftarget=ftarget, iprint=iprint)
 
@@ -216,16 +224,15 @@ else
 
                 call safealloc(x, n)
                 x = x0
-                call bobyqa(noisy_calfun, x, f, xl=prob % lb, xu=prob % ub, &
+                call bobyqa(noisy_calfun, x, f, xl=prob % xl, xu=prob % xu, npt=npt, &
                     & rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, maxhist=maxhist, fhist=fhist, &
                     & xhist=xhist, ftarget=ftarget, iprint=iprint)
 
                 if (prob % probtype == 'u') then  ! Run the test without constraints
                     call safealloc(x_unc, n)
                     x_unc = x0
-                    call bobyqa(noisy_calfun, x_unc, f_unc, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, &
-                        & maxhist=maxhist, fhist=fhist, xhist=xhist, ftarget=ftarget, &
-                        & iprint=iprint)
+                    call bobyqa(noisy_calfun, x_unc, f_unc, npt=npt, rhobeg=rhobeg, rhoend=rhoend, maxfun=maxfun, &
+                        & maxhist=maxhist, fhist=fhist, xhist=xhist, ftarget=ftarget, iprint=iprint)
                     call validate(all(abs(x - x_unc) <= 0), 'X == X_UNC', srname)
                     call validate(abs(f - f_unc) <= 0 .or. (is_neginf(f) .and. is_neginf(f_unc)), 'F == F_UNC', srname)
                 end if
